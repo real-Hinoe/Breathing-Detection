@@ -1,6 +1,6 @@
 import sys
 from PyQt5 import QtWidgets, QtCore, QtGui
-
+import cam
 
 def center_widget_on_screen(widget, width, height):
     geom = QtWidgets.QApplication.primaryScreen().availableGeometry()
