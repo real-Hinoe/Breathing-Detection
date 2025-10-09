@@ -4,6 +4,7 @@ from PyQt5.QtGui import QPixmap, QImage
 from PyQt5 import QtWidgets
 import numpy as np
 import cv2
+import platform
 
 
 class VideoThread(QThread):
@@ -15,7 +16,10 @@ class VideoThread(QThread):
         self.run_flag = True
 
     def run(self):
-        cap = cv2.VideoCapture(0) 
+        is_mac = platform.system() == "Darwin"
+        backend = cv2.CAP_AVFOUNDATION if is_mac else cv2.CAP_DSHOW
+        cap = cv2.VideoCapture(0, backend)
+
         while self.run_flag:
             ret, cv_img = cap.read()
             cv2.waitKey(1)
