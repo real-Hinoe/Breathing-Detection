@@ -5,6 +5,7 @@ from PyQt5 import QtWidgets
 import numpy as np
 import cv2
 import platform
+from detection import HandsDetection
 
 
 class VideoThread(QThread):
@@ -74,10 +75,13 @@ class AutoBinder(QObject):
             return
 
         t = VideoThread()
+        hands_detection = HandsDetection()
         
         @pyqtSlot(np.ndarray)
         def update(cv_img):
-            qt_img = convert_cv_qt(cv_img)
+            hands_detection.set_img(cv_img)
+            hands_img = hands_detection.find_hands()
+            qt_img = convert_cv_qt(hands_img)
             qt_img = qt_img.scaled(label.width(), label.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             label.setPixmap(qt_img)
 
@@ -134,6 +138,7 @@ def patch_qapp_init_once():
     if hasattr(QtWidgets.QApplication, "__mini_cam_patched__"):
         return
     orig = QtWidgets.QApplication.__init__
+
     def wrapped(self, *a, **kw):
         orig(self, *a, **kw)
         bootstrap()
