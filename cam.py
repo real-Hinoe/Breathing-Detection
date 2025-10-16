@@ -1,7 +1,5 @@
-# cam.py
 from PyQt5.QtCore import QThread, Qt, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
-import numpy as np
 import cv2
 import platform
 
@@ -11,26 +9,61 @@ class VideoThread(QThread):
     Использует OpenCV VideoCapture и отправляет кадры в главный поток через pyqtSignal.
     """
 
-    change_pixmap_signal = pyqtSignal(np.ndarray)
+    change_pixmap_signal = pyqtSignal(QPixmap)
 
-    def __init__(self, cam_index=0):
+    def __init__(self, cam_index=0, cap_width=640, cap_height=360, processor=None, target_label=None):
         super().__init__()
         self.run_flag = True
         self.cam_index = cam_index
+        self.cap_width = cap_width
+        self.cap_height = cap_height
+        self.processor = processor
+        self.label = target_label
 
     def run(self):
         """Основной цикл потока: открывает камеру, читает кадры, эмитит сигнал."""
         is_mac = platform.system() == "Darwin"
         backend = cv2.CAP_AVFOUNDATION if is_mac else cv2.CAP_DSHOW
         cap = cv2.VideoCapture(self.cam_index, backend)
+
+        # Попробуем установить пониженное разрешение (ускоряет обработку)
+        try:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cap_width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cap_height)
+        except Exception:
+            pass
+
         if not cap.isOpened():
             cap.release()
             cap = cv2.VideoCapture(self.cam_index)
+
         while self.run_flag:
             ret, cv_img = cap.read()
             cv2.waitKey(1)
-            if ret:
-                self.change_pixmap_signal.emit(cv_img)
+            if not ret:
+                # небольшая пауза чтобы не крутить цикл вхолостую
+                self.msleep(10)
+                continue
+
+            # Обработка в воркер-потоке (MediaPipe)
+            try:
+                processed = self.processor(cv_img) # BGR numpy array
+            except Exception as ex:
+                # в случае ошибки просто отправляем сырой кадр
+                processed = cv_img
+
+            # Конвертация в QPixmap
+            pix = convert_cv_qt(processed).scaled(
+                self.label.width(),
+                self.label.height(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.change_pixmap_signal.emit(pix)
+
+            # Небольшой отдых, чтобы не 100% загружать CPU
+            self.msleep(5)
+
         cap.release()
 
     def stop(self):
@@ -63,7 +96,7 @@ class CameraController:
         """Запускает поток захвата, если он ещё не активен."""
         if self.thread and self.thread.isRunning():
             return
-        self.thread = VideoThread(self.cam_index)
+        self.thread = VideoThread(self.cam_index, processor=self.processor, target_label=self.label)
         self.thread.change_pixmap_signal.connect(self.on_frame)
         self.thread.start()
 
@@ -79,14 +112,6 @@ class CameraController:
         if hasattr(self.label, "setPixmap"):
             self.label.setPixmap(QPixmap())
 
-    def on_frame(self, cv_img):
+    def on_frame(self, pix):
         """Обрабатывает кадр и выводит его на экран."""
-        if self.processor:
-            cv_img = self.processor(cv_img)
-        pix = convert_cv_qt(cv_img).scaled(
-            self.label.width(),
-            self.label.height(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
         self.label.setPixmap(pix)

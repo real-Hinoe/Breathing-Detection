@@ -124,11 +124,10 @@ class CameraWindow(QtWidgets.QMainWindow):
         if self.camera is None:
             target = self.video_holder.inner_widget()
 
-            hd = HandsDetection()
+            hd = HandsDetection(frame_skip=1)
 
             def processor(img):
-                hd.set_img(img)
-                return hd.find_hands()
+                return hd.find_hands(img)
 
             self.camera = cam.CameraController(target_label=target, processor=processor)
         self.camera.start()
