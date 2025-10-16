@@ -1,150 +1,117 @@
-from PyQt5.QtWidgets import QWidget, QPushButton, QLabel
-from PyQt5.QtCore import QThread, Qt, pyqtSignal, pyqtSlot, QObject, QEvent
-from PyQt5.QtGui import QPixmap, QImage
-from PyQt5 import QtWidgets
-import numpy as np
+from PyQt5.QtCore import QThread, Qt, pyqtSignal
+from PyQt5.QtGui import QImage, QPixmap
 import cv2
 import platform
-from detection import HandsDetection
 
 
 class VideoThread(QThread):
+    """Отдельный поток для захвата кадров с камеры.
+    Использует OpenCV VideoCapture и отправляет кадры в главный поток через pyqtSignal.
+    """
 
-    change_pixmap_signal = pyqtSignal(np.ndarray)
+    change_pixmap_signal = pyqtSignal(QPixmap)
 
-    def __init__(self):
+    def __init__(self, cam_index=0, cap_width=640, cap_height=360, processor=None, target_label=None):
         super().__init__()
         self.run_flag = True
+        self.cam_index = cam_index
+        self.cap_width = cap_width
+        self.cap_height = cap_height
+        self.processor = processor
+        self.label = target_label
 
     def run(self):
+        """Основной цикл потока: открывает камеру, читает кадры, эмитит сигнал."""
         is_mac = platform.system() == "Darwin"
         backend = cv2.CAP_AVFOUNDATION if is_mac else cv2.CAP_DSHOW
-        cap = cv2.VideoCapture(0, backend)
+        cap = cv2.VideoCapture(self.cam_index, backend)
+
+        # Попробуем установить пониженное разрешение (ускоряет обработку)
+        try:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cap_width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cap_height)
+        except Exception:
+            pass
+
+        if not cap.isOpened():
+            cap.release()
+            cap = cv2.VideoCapture(self.cam_index)
 
         while self.run_flag:
             ret, cv_img = cap.read()
             cv2.waitKey(1)
-            if ret:
-                self.change_pixmap_signal.emit(cv_img)
+            if not ret:
+                # небольшая пауза чтобы не крутить цикл вхолостую
+                self.msleep(10)
+                continue
+
+            # Обработка в воркер-потоке (MediaPipe)
+            try:
+                processed = self.processor(cv_img) # BGR numpy array
+            except Exception as ex:
+                # в случае ошибки просто отправляем сырой кадр
+                processed = cv_img
+
+            # Конвертация в QPixmap
+            pix = convert_cv_qt(processed).scaled(
+                self.label.width(),
+                self.label.height(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.change_pixmap_signal.emit(pix)
+
+            # Небольшой отдых, чтобы не 100% загружать CPU
+            self.msleep(5)
+
         cap.release()
 
     def stop(self):
+        """Останавливает поток и дожидается завершения."""
         self.run_flag = False
         self.wait()
 
 
 def convert_cv_qt(cv_img):
+    """Преобразует кадр OpenCV (BGR) в QPixmap для отображения в QLabel."""
     rgb_image = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
     h, w, ch = rgb_image.shape
-    bytes_per_line = ch * w
-    qimg = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
-    qimg = qimg.scaled(w, h)
+    qimg = QImage(rgb_image.data, w, h, ch * w, QImage.Format_RGB888)
     return QPixmap.fromImage(qimg)
 
 
-class AutoBinder(QObject):
-   
-    def __init__(self, app):
-        super().__init__(app)
-        self.app = app
-        self.threads = {}  
-        app.installEventFilter(self)
+class CameraController:
+    """
+    Запускает VideoThread, получает кадры и обновляет целевой QLabel.
+    Может принимать произвольный «обработчик кадров» (processor).
+    """
 
-    def eventFilter(self, obj, event):
-        if isinstance(obj, QWidget):
-            if event.type() == QEvent.Show:
-                self.try_start(obj)
-            elif event.type() in (QEvent.Hide, QEvent.Close):
-                self.try_stop(obj)
-        return super().eventFilter(obj, event)
+    def __init__(self, target_label, processor=None, cam_index=0):
+        self.label = target_label
+        self.processor = processor
+        self.cam_index = cam_index
+        self.thread = None
 
-    def get_label(self, window):
-        try:
-            holder = getattr(window, "video_holder", None)
-            if holder is None or not hasattr(holder, "inner_widget"):
-                return None
-            return holder.inner_widget()
-        except Exception:
-            return None
-
-    def try_start(self, window):
-        if id(window) in self.threads:
+    def start(self):
+        """Запускает поток захвата, если он ещё не активен."""
+        if self.thread and self.thread.isRunning():
             return
-        label = self.get_label(window)
-        if not isinstance(label, QLabel):
-            return
+        self.thread = VideoThread(self.cam_index, processor=self.processor, target_label=self.label)
+        self.thread.change_pixmap_signal.connect(self.on_frame)
+        self.thread.start()
 
-        t = VideoThread()
-        hands_detection = HandsDetection()
-        
-        @pyqtSlot(np.ndarray)
-        def update(cv_img):
-            hands_detection.set_img(cv_img)
-            hands_img = hands_detection.find_hands()
-            qt_img = convert_cv_qt(hands_img)
-            qt_img = qt_img.scaled(label.width(), label.height(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            label.setPixmap(qt_img)
-
-        t.change_pixmap_signal.connect(update)
-        t.start()
-        self.threads[id(window)] = (t, update)
-
-        info = getattr(window, "info_label", None)
-        if isinstance(info, QLabel):
-            info.setText("Камера: работает")
-
-        btn = getattr(window, "btn_back", None)
-        if isinstance(btn, QPushButton):
+    def stop(self):
+        """Останавливает поток и очищает QLabel."""
+        if self.thread:
             try:
-                btn.clicked.disconnect(self.on_back)
+                self.thread.change_pixmap_signal.disconnect(self.on_frame)
             except Exception:
                 pass
-            btn.clicked.connect(self.on_back)
+            self.thread.stop()
+            self.thread = None
+        if hasattr(self.label, "setPixmap"):
+            self.label.setPixmap(QPixmap())
 
-    def try_stop(self, window):
-        key = id(window)
-        pair = self.threads.pop(key, None)
-        if pair:
-            t, update = pair
-            try:
-                t.change_pixmap_signal.disconnect(update)
-            except Exception:
-                pass
-            t.stop()
-
-            label = self.get_label(window)
-            if isinstance(label, QLabel):
-                label.setPixmap(QPixmap())
-
-    def on_back(self):
-        btn = self.sender()
-        if not isinstance(btn, QPushButton):
-            return
-        win = btn.window()
-        self.try_stop(win)
-        try:
-            win.close()
-        except Exception:
-            pass
-
-
-def bootstrap():
-    app = QtWidgets.QApplication.instance()
-    if app is not None and not hasattr(app, "_mini_cam_binder"):
-        app._mini_cam_binder = AutoBinder(app)
-
-
-def patch_qapp_init_once():
-    if hasattr(QtWidgets.QApplication, "__mini_cam_patched__"):
-        return
-    orig = QtWidgets.QApplication.__init__
-
-    def wrapped(self, *a, **kw):
-        orig(self, *a, **kw)
-        bootstrap()
-    QtWidgets.QApplication.__init__ = wrapped
-    QtWidgets.QApplication.__mini_cam_patched__ = True
-
-
-bootstrap()
-patch_qapp_init_once()
+    def on_frame(self, pix):
+        """Обрабатывает кадр и выводит его на экран."""
+        self.label.setPixmap(pix)
