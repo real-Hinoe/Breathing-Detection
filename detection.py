@@ -1,5 +1,5 @@
-import mediapipe as mp
 import cv2
+import mediapipe as mp
 
 
 class HandsDetection:
@@ -17,7 +17,7 @@ class HandsDetection:
         self.frame_idx = 0
 
     def find_hands(self, cv_img):
-        img = cv2.flip(cv_img, 1) # Зеркалим изображение
+        img = cv2.flip(cv_img, 1)  # Зеркалим изображение
 
         # Пропускаем каждые "frame_skip" кадров.
         if self.frame_idx % (self.frame_skip + 1) == 0:
@@ -29,10 +29,10 @@ class HandsDetection:
             if results.multi_hand_landmarks:
                 # Находим позиции (landmarks) на ладони
                 for handLms in results.multi_hand_landmarks:
-                    for id, lm in enumerate(handLms.landmark):
+                    for i, lm in enumerate(handLms.landmark):
                         h, w, c = img.shape
                         cx, cy = int(lm.x * w), int(lm.y * h)
-                        if id == 8 or id == 12:
+                        if i == 8 or i == 12:
                             # Выделяем кончик указательного и среднего пальца
                             cv2.circle(img, (cx, cy), 10, (255, 0, 255),
                                        cv2.FILLED)
@@ -43,10 +43,10 @@ class HandsDetection:
         else:
             if self.last_results.multi_hand_landmarks:
                 for handLms in self.last_results.multi_hand_landmarks:
-                    for id, lm in enumerate(handLms.landmark):
+                    for i, lm in enumerate(handLms.landmark):
                         h, w, c = img.shape
                         cx, cy = int(lm.x * w), int(lm.y * h)
-                        if id == 8 or id == 12:
+                        if i == 8 or i == 12:
                             cv2.circle(img, (cx, cy), 10, (255, 0, 255),
                                        cv2.FILLED)
 

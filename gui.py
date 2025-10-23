@@ -1,6 +1,5 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
 import cam
-from detection import HandsDetection
 
 
 # Центрирует виджет на экране.
@@ -153,13 +152,7 @@ class CameraWindow(QtWidgets.QMainWindow):
         """Запускает контроллер камеры и поток захвата."""
         if self.camera is None:
             target = self.video_holder.inner_widget()
-
-            hd = HandsDetection(frame_skip=1)
-
-            def processor(img):
-                return hd.find_hands(img)
-
-            self.camera = cam.CameraController(target_label=target, processor=processor)
+            self.camera = cam.CameraController(target_label=target)
         self.camera.start()
         if self.info_label:
             self.info_label.setText("Камера: работает")

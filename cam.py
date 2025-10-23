@@ -1,7 +1,7 @@
+import platform
+import cv2
 from PyQt5.QtCore import QThread, Qt, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
-import cv2
-import platform
 
 
 class VideoThread(QThread):
@@ -11,14 +11,15 @@ class VideoThread(QThread):
 
     change_pixmap_signal = pyqtSignal(QPixmap)
 
-    def __init__(self, cam_index=0, cap_width=640, cap_height=360, processor=None, target_label=None):
+    def __init__(self, cam_index=0, cap_width=640, cap_height=360, target_label=None):
         super().__init__()
         self.run_flag = True
         self.cam_index = cam_index
         self.cap_width = cap_width
         self.cap_height = cap_height
-        self.processor = processor
         self.label = target_label
+        self.import_success = False
+        self.processor = None
 
     def run(self):
         """Основной цикл потока: открывает камеру, читает кадры, эмитит сигнал."""
@@ -33,6 +34,20 @@ class VideoThread(QThread):
         except Exception:
             pass
 
+        # ВАЖНО: хоть у нас уже и загружена библиотека MediaPipe,
+        # данный кусок кода нужен, чтобы программа не крашнулась при попытке
+        # запустить камеру, когда библиотека еще не успела загрузиться.
+
+        print("Loading MediaPipe...")
+        # Импорт HandsDetection (MediaPipe)
+        try:
+            from detection import HandsDetection
+            self.import_success = True
+            self.processor = HandsDetection()
+            print("MediaPipe loaded")
+        except Exception as e:
+            print(f"Failed to load!\n{e}")
+
         if not cap.isOpened():
             cap.release()
             cap = cv2.VideoCapture(self.cam_index)
@@ -45,10 +60,9 @@ class VideoThread(QThread):
                 self.msleep(10)
                 continue
 
-            # Обработка в воркер-потоке (MediaPipe)
-            try:
-                processed = self.processor(cv_img) # BGR numpy array
-            except Exception as ex:
+            if self.import_success:
+                processed = self.processor.find_hands(cv_img)  # BGR numpy array
+            else:
                 # в случае ошибки просто отправляем сырой кадр
                 processed = cv_img
 
@@ -86,9 +100,8 @@ class CameraController:
     Может принимать произвольный «обработчик кадров» (processor).
     """
 
-    def __init__(self, target_label, processor=None, cam_index=0):
+    def __init__(self, target_label, cam_index=0):
         self.label = target_label
-        self.processor = processor
         self.cam_index = cam_index
         self.thread = None
 
@@ -96,7 +109,7 @@ class CameraController:
         """Запускает поток захвата, если он ещё не активен."""
         if self.thread and self.thread.isRunning():
             return
-        self.thread = VideoThread(self.cam_index, processor=self.processor, target_label=self.label)
+        self.thread = VideoThread(self.cam_index, target_label=self.label)
         self.thread.change_pixmap_signal.connect(self.on_frame)
         self.thread.start()
 
