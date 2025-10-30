@@ -1,9 +1,13 @@
 from concurrent.futures import ThreadPoolExecutor
 import importlib
+import logging
 import sys
 
 # только долго запускающиеся библиотеки
 modules_to_load = ['mediapipe']
+logger = logging.getLogger(__name__)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 
 def do_import(module_name):
@@ -13,7 +17,7 @@ def do_import(module_name):
 
     module = importlib.import_module(module_name)
     setattr(thismodule, module_name, module)
-    print(module_name, 'imported')
+    logger.info(f"{module_name} imported")
 
 
 executor = ThreadPoolExecutor()

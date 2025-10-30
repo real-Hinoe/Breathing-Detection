@@ -152,10 +152,11 @@ class CameraWindow(QtWidgets.QMainWindow):
         """Запускает контроллер камеры и поток захвата."""
         if self.camera is None:
             target = self.video_holder.inner_widget()
-            self.camera = cam.CameraController(target_label=target)
+            self.camera = cam.CameraController(
+                target_label=target, description_label=self.info_label)
         self.camera.start()
         if self.info_label:
-            self.info_label.setText("Камера: работает")
+            self.info_label.setText("Ожидание запуска камеры...")
 
     def stop_camera(self):
         """Останавливает поток камеры и освобождает ресурсы."""

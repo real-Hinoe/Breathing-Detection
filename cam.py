@@ -1,8 +1,13 @@
 import platform
+import logging
+import sys
 import cv2
 from PyQt5.QtCore import QThread, Qt, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(stream=sys.stdout, level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 class VideoThread(QThread):
     """Отдельный поток для захвата кадров с камеры.
@@ -10,16 +15,22 @@ class VideoThread(QThread):
     """
 
     change_pixmap_signal = pyqtSignal(QPixmap)
+    detection_desc_signal = pyqtSignal(str)
 
-    def __init__(self, cam_index=0, cap_width=640, cap_height=360, target_label=None):
+    def __init__(self, cam_index=0, cap_width=640, cap_height=360, fps=30,
+                 target_label=None, description_label=None):
         super().__init__()
         self.run_flag = True
         self.cam_index = cam_index
         self.cap_width = cap_width
         self.cap_height = cap_height
         self.label = target_label
+        self.desc_label = description_label
         self.import_success = False
         self.processor = None
+
+        self.fps = fps
+        self.prev = 0
 
     def run(self):
         """Основной цикл потока: открывает камеру, читает кадры, эмитит сигнал."""
@@ -38,15 +49,15 @@ class VideoThread(QThread):
         # данный кусок кода нужен, чтобы программа не крашнулась при попытке
         # запустить камеру, когда библиотека еще не успела загрузиться.
 
-        print("Loading MediaPipe...")
+        logging.info("loading mediapipe...")
         # Импорт HandsDetection (MediaPipe)
         try:
             from detection import HandsDetection
             self.import_success = True
             self.processor = HandsDetection()
-            print("MediaPipe loaded")
+            logging.info("mediapipe loaded")
         except Exception as e:
-            print(f"Failed to load!\n{e}")
+            logging.exception(f"Failed to load!\n{e}")
 
         if not cap.isOpened():
             cap.release()
@@ -54,17 +65,28 @@ class VideoThread(QThread):
 
         while self.run_flag:
             ret, cv_img = cap.read()
-            cv2.waitKey(1)
+            # Ставим заданный FPS
+            cv2.waitKey(1000 // self.fps)
             if not ret:
                 # небольшая пауза чтобы не крутить цикл вхолостую
                 self.msleep(10)
                 continue
 
             if self.import_success:
-                processed = self.processor.find_hands(cv_img)  # BGR numpy array
+                # BGR numpy array & кол-во ладоней
+                processed, n_hands = self.processor.find_hands(cv_img)
             else:
                 # в случае ошибки просто отправляем сырой кадр
-                processed = cv_img
+                processed, n_hands = cv_img, -1
+
+            if n_hands == 0:
+                self.detection_desc_signal.emit("Не обнаружено ладоней")
+            elif n_hands == 1:
+                self.detection_desc_signal.emit("Обнаружена одна ладонь")
+            elif n_hands == 2:
+                self.detection_desc_signal.emit("Обнаружено две ладони")
+            else:
+                self.detection_desc_signal.emit("Undefined")
 
             # Конвертация в QPixmap
             pix = convert_cv_qt(processed).scaled(
@@ -100,8 +122,9 @@ class CameraController:
     Может принимать произвольный «обработчик кадров» (processor).
     """
 
-    def __init__(self, target_label, cam_index=0):
+    def __init__(self, target_label, description_label=None, cam_index=0):
         self.label = target_label
+        self.desc_label = description_label
         self.cam_index = cam_index
         self.thread = None
 
@@ -109,8 +132,10 @@ class CameraController:
         """Запускает поток захвата, если он ещё не активен."""
         if self.thread and self.thread.isRunning():
             return
-        self.thread = VideoThread(self.cam_index, target_label=self.label)
+        self.thread = VideoThread(self.cam_index, target_label=self.label,
+                                  description_label=self.desc_label)
         self.thread.change_pixmap_signal.connect(self.on_frame)
+        self.thread.detection_desc_signal.connect(self.on_detection)
         self.thread.start()
 
     def stop(self):
@@ -128,3 +153,7 @@ class CameraController:
     def on_frame(self, pix):
         """Обрабатывает кадр и выводит его на экран."""
         self.label.setPixmap(pix)
+
+    def on_detection(self, string):
+        """Выводит информацию об обработанном кадре"""
+        self.desc_label.setText(string)
