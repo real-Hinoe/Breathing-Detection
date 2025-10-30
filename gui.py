@@ -1,4 +1,5 @@
 from PyQt5 import QtWidgets, QtCore, QtGui
+from game.core import GameCanvas
 import cam
 
 
@@ -25,7 +26,9 @@ class AspectLabel(QtWidgets.QLabel):
         self._inner = QtWidgets.QLabel(self)
         self._inner.setAlignment(QtCore.Qt.AlignCenter)
         # задаём фон и рамку, чтобы было видно границы
-        self._inner.setStyleSheet(f"background-color: {bg_color.name()}; border: 1px solid #444;")
+        self._inner.setStyleSheet(
+            f"background-color: {bg_color.name()}; border: 1px solid #444;"
+        )
         # минимум 16x9 пикселей - это не реальный размер, а защита от полного схлопывания
         # по сути уже не нужна, т.к. размеры окна у нас фиксированные
         self._inner.setMinimumSize(16, 9)
@@ -116,6 +119,7 @@ class CameraWindow(QtWidgets.QMainWindow):
         vbox.setContentsMargins(0, 0, 0, 0)
         vbox.setSpacing(0)
 
+        self.game_holder = AspectLabel(bg_color=QtGui.QColor(240, 240, 240))
         self.video_holder = AspectLabel(bg_color=QtGui.QColor(220, 235, 255))
         self.video_holder.inner_widget().setText("Плейсхолдер камеры\n(16:9)")
         vbox.addWidget(self.video_holder, stretch=9)
@@ -126,9 +130,9 @@ class CameraWindow(QtWidgets.QMainWindow):
         bl = QtWidgets.QHBoxLayout(bottom)
         bl.setContentsMargins(8, 4, 8, 4)
         # Текст здесь временный - позже сюда будут попадать подсказки от анализа видео
-        self.info_label = QtWidgets.QLabel("Тут будут команды типа "
-                                           "выпрямите спину, смотрите в "
-                                           "камеру и т.п.")
+        self.info_label = QtWidgets.QLabel(
+            "Тут будут команды типа выпрямите спину, смотрите в камеру и т.п."
+        )
         bl.addWidget(self.info_label)
         vbox.addWidget(bottom, stretch=1)
 
@@ -138,7 +142,9 @@ class CameraWindow(QtWidgets.QMainWindow):
         self.setFixedSize(w, h)
 
         # кнопка возврата в правом-низу - позиция вычисляется от размера окна
-        self.btn_back = styled_tile_button("Вернуться", btn_w, btn_h, font_px, parent=self)
+        self.btn_back = styled_tile_button(
+            "Вернуться", btn_w, btn_h, font_px, parent=self
+        )
         margin = 12
         bx = self.width() - btn_w - margin
         by = self.height() - btn_h - margin
@@ -226,9 +232,20 @@ class GameWindow(QtWidgets.QMainWindow):
         vbox.setSpacing(0)
 
         self.game_holder = AspectLabel(bg_color=QtGui.QColor(240, 240, 240))
-        self.game_holder.inner_widget().setText(
-            f"Игровая зона (уровень {self.level})\n16:9"
-        )
+        inner = self.game_holder.inner_widget()
+        inner.setText("")  # убираем текст
+        layout = QtWidgets.QVBoxLayout(inner)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.canvas = GameCanvas(
+            parent=inner, with_gravity=True
+        )  # или False, как у тебя задумано
+        layout.addWidget(self.canvas)
+        # ключевые 3 строки:
+        inner.setFocusPolicy(QtCore.Qt.StrongFocus)
+        inner.setFocusProxy(self.canvas)  # все нажатия фокуса проксируются в канву
+        self.canvas.setFocus()  # и сразу отдаём фокус канве
+        layout.addWidget(self.canvas)
+        self.canvas.setFocus()
         vbox.addWidget(self.game_holder, stretch=9)
 
         bottom = QtWidgets.QFrame()
@@ -237,8 +254,9 @@ class GameWindow(QtWidgets.QMainWindow):
         bl = QtWidgets.QHBoxLayout(bottom)
         bl.setContentsMargins(8, 4, 8, 4)
         # Тут будут отображаться игровые значения или результаты анализа дыхания
-        self.status_label = QtWidgets.QLabel("Тут игровые значения и/или "
-                                             "информация о правильности дыхания")
+        self.status_label = QtWidgets.QLabel(
+            "Тут игровые значения и/или информация о правильности дыхания"
+        )
         bl.addWidget(self.status_label)
         vbox.addWidget(bottom, stretch=1)
 
@@ -248,8 +266,13 @@ class GameWindow(QtWidgets.QMainWindow):
 
         # кнопка возврата - позиционируем в правом-низу,
         # используем width/height окна, чтобы позиция не уезжала
-        self.btn_back = styled_tile_button("Вернуться", self._back_btn_w,
-                                           self._back_btn_h, self._back_font, parent=self)
+        self.btn_back = styled_tile_button(
+            "Вернуться",
+            self._back_btn_w,
+            self._back_btn_h,
+            self._back_font,
+            parent=self,
+        )
         margin = 12
         bx = self.width() - self._back_btn_w - margin
         by = self.height() - self._back_btn_h - margin
@@ -277,14 +300,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.win_height = max(300, screen.height() // 2)
 
         # размеры плиток и шрифта считаем пропорционально главному окну
-        self.tile_w = max(260, int(self.win_width*0.55))
-        self.tile_h = max(64, int(self.win_height*0.14))
-        self.font_px = max(14, int(self.tile_h*0.35))
+        self.tile_w = max(260, int(self.win_width * 0.55))
+        self.tile_h = max(64, int(self.win_height * 0.14))
+        self.font_px = max(14, int(self.tile_h * 0.35))
 
         # размеры кнопок "вернуться" в дочерних окнах
-        self.child_back_w = max(120, int(self.win_width*0.18))
-        self.child_back_h = max(40, int(self.win_height*0.08))
-        self.child_back_font = max(12, int(self.child_back_h*0.35))
+        self.child_back_w = max(120, int(self.win_width * 0.18))
+        self.child_back_h = max(40, int(self.win_height * 0.08))
+        self.child_back_font = max(12, int(self.child_back_h * 0.35))
 
         # здесь храним единственный экземпляр окна камеры и единственный экземпляр игрового окна
         self._camera_window = None
@@ -372,8 +395,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.stack.addWidget(settings_page)
 
         # место для логов/ошибок - пока просто красный текст
-        info = QtWidgets.QLabel("Тут будут отображаться всякие ошибки и сбои в программе,"
-                                " ну или можно просто удалить")
+        info = QtWidgets.QLabel(
+            "Тут будут отображаться всякие ошибки и сбои в программе,"
+            " ну или можно просто удалить"
+        )
         info.setStyleSheet("color:red")
         main_layout.addWidget(info)
         self.setCentralWidget(central)
@@ -394,8 +419,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._game_window.activateWindow()
                 return
             base_size = QtCore.QSize(self.win_width, self.win_height)
-            gw = GameWindow(base_size, level, self, self.child_back_w,
-                            self.child_back_h, self.child_back_font)
+            gw = GameWindow(
+                base_size,
+                level,
+                self,
+                self.child_back_w,
+                self.child_back_h,
+                self.child_back_font,
+            )
             # при закрытии игрового окна main window должен убрать ссылку на него
             gw.closed.connect(self._on_game_window_closed)
             gw.setFixedSize(base_size.width(), base_size.height())
@@ -419,7 +450,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._camera_window.activateWindow()
             return
         base_size = QtCore.QSize(self.win_width, self.win_height)
-        self._camera_window = CameraWindow(base_size, self.child_back_w, self.child_back_h, self.child_back_font)
+        self._camera_window = CameraWindow(
+            base_size, self.child_back_w, self.child_back_h, self.child_back_font
+        )
         # кнопка в окне камеры возвращает сюда
         self._camera_window.btn_back.clicked.connect(self._camera_back_clicked)
         self._camera_window.closed.connect(self._on_camera_closed)

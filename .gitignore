@@ -1,7 +1,56 @@
-/.idea/.gitignore
-/.idea/BreathingDetection.iml
-/.idea/misc.xml
-/.idea/modules.xml
-/.idea/inspectionProfiles/profiles_settings.xml
-/.idea/inspectionProfiles/Project_Default.xml
-/.idea/vcs.xml
+# === Python basics ===
+__pycache__/
+*.py[cod]
+*$py.class
+
+# === Virtual environments ===
+.venv/
+venv/
+env/
+ENV/
+*.env
+
+# === OS cache ===
+.DS_Store
+Thumbs.db
+
+# === IDE files ===
+.vscode/
+.idea/
+
+# === Logs, temporary, debug ===
+*.log
+*.tmp
+*.bak
+*.swp
+
+# === Bytecode and build ===
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# === Jupyter ===
+.ipynb_checkpoints/
+
+# === PyInstaller / Packaging ===
+*.spec
+
+# === Qt/PyQt cache ===
+*.qrc.py
+*.ui.py
+*.pyc
+*__pycache__/
+*.pyo
+
+# === Project-specific ===
+/load_modules.pyc
+/resources/__pycache__/
+/game/__pycache__/
+/gui.cpython-*
+/core.cpython-*
+
+# === Local configs ===
+*.local
+*.secret
