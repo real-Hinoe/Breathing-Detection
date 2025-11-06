@@ -84,6 +84,96 @@ def styled_tile_button(text, width, height, font_px, parent=None):
     return btn
 
 
+# DebugWindow
+# - Окно дебаггинга, которое пришивается к главному окну сбоку
+# - Занимает 1/3 ширины главного окна, всегда присутствует при включенном режиме дебаггинга
+class DebugWindow(QtWidgets.QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.debug_enabled = True
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        title = QtWidgets.QLabel("Окно дебаггинга")
+        title.setStyleSheet("font-weight: bold; font-size: 14px; color: #333;")
+        layout.addWidget(title)
+
+        self.log_text = QtWidgets.QTextEdit()
+        self.log_text.setReadOnly(True)
+        self.log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #f5f5f5;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+                padding: 8px;
+                font-family: 'Courier New', monospace;
+                font-size: 12px;
+            }
+        """)
+        layout.addWidget(self.log_text, stretch=1)
+
+        button_layout = QtWidgets.QHBoxLayout()
+
+        self.copy_btn = QtWidgets.QPushButton("Скопировать")
+        self.copy_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #007bff;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #0069d9;
+            }
+        """)
+
+        self.clear_btn = QtWidgets.QPushButton("Очистить")
+        self.clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 6px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #5a6268;
+            }
+        """)
+
+        button_layout.addWidget(self.copy_btn)
+        button_layout.addWidget(self.clear_btn)
+        layout.addLayout(button_layout)
+
+        self.clear_btn.clicked.connect(self.clear_logs)
+        self.copy_btn.clicked.connect(self.copy_logs)
+
+    def clear_logs(self):
+        self.log_text.clear()
+
+    def copy_logs(self):
+        text = self.log_text.toPlainText()
+        if text:
+            clipboard = QtWidgets.QApplication.clipboard()
+            clipboard.setText(text)
+
+    def add_log(self, message):
+        if self.debug_enabled:
+            timestamp = QtCore.QDateTime.currentDateTime().toString("hh:mm:ss")
+            self.log_text.append(f"[{timestamp}] {message}")
+
+    def set_debug_enabled(self, enabled):
+        self.debug_enabled = enabled
+        self.setVisible(enabled)
+
+
 # CameraWindow
 # - Окно-плейсхолдер под камеру/калибровку.
 # - base_size: QtCore.QSize - размер, который нужно использовать для окна.
@@ -294,19 +384,25 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.stack = None
+        self.debug_window = None
+        self.debug_enabled = True
         self.setWindowTitle("Меню")
         screen = QtWidgets.QApplication.primaryScreen().availableGeometry()
-        self.win_width = max(400, screen.width() // 2)
-        self.win_height = max(300, screen.height() // 2)
+
+        self.base_width = max(400, screen.width() // 2)
+        self.base_height = max(300, screen.height() // 2)
+
+        self.debug_width = int(self.base_width * 1.5)
+        self.debug_height = self.base_height
 
         # размеры плиток и шрифта считаем пропорционально главному окну
-        self.tile_w = max(260, int(self.win_width * 0.55))
-        self.tile_h = max(64, int(self.win_height * 0.14))
+        self.tile_w = max(260, int(self.base_width * 0.55))
+        self.tile_h = max(64, int(self.base_height * 0.14))
         self.font_px = max(14, int(self.tile_h * 0.35))
 
         # размеры кнопок "вернуться" в дочерних окнах
-        self.child_back_w = max(120, int(self.win_width * 0.18))
-        self.child_back_h = max(40, int(self.win_height * 0.08))
+        self.child_back_w = max(120, int(self.base_width * 0.18))
+        self.child_back_h = max(40, int(self.base_height * 0.08))
         self.child_back_font = max(12, int(self.child_back_h * 0.35))
 
         # здесь храним единственный экземпляр окна камеры и единственный экземпляр игрового окна
@@ -315,27 +411,39 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.init_ui()
         # ставим окно по центру и фиксируем его размер
-        center_widget_on_screen(self, self.win_width, self.win_height)
-        self.setFixedSize(self.win_width, self.win_height)
+        self.update_window_size()
+        center_widget_on_screen(self, self.debug_width, self.debug_height)
+
+    def update_window_size(self):
+        if self.debug_enabled:
+            self.setFixedSize(self.debug_width, self.debug_height)
+        else:
+            self.setFixedSize(self.base_width, self.base_height)
+        center_widget_on_screen(self, self.width(), self.height())
 
     # Собираем интерфейс главного окна.
     # - меню: Играть/Настройки/Выход,
     # - выбор уровня: кнопки 1..4 и кнопка Назад,
     # - настройки: кнопка открытия окна камеры и кнопка Назад.
     def init_ui(self):
-        central = QtWidgets.QWidget()
-        main_layout = QtWidgets.QVBoxLayout(central)
-        main_layout.setContentsMargins(16, 16, 16, 16)
-        main_layout.setSpacing(12)
+        main_container = QtWidgets.QWidget()
+        self.main_layout = QtWidgets.QHBoxLayout(main_container)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+
+        self.main_content = QtWidgets.QWidget()
+        main_content_layout = QtWidgets.QVBoxLayout(self.main_content)
+        main_content_layout.setContentsMargins(16, 16, 16, 16)
+        main_content_layout.setSpacing(12)
 
         self.stack = QtWidgets.QStackedWidget()
-        main_layout.addWidget(self.stack, stretch=1)
+        main_content_layout.addWidget(self.stack, stretch=1)
 
         # меню приложения - три крупные плитки
         menu_page = QtWidgets.QWidget()
         ml = QtWidgets.QVBoxLayout(menu_page)
         ml.setAlignment(QtCore.Qt.AlignCenter)
-        ml.setSpacing(max(12, int(self.win_height * 0.04)))
+        ml.setSpacing(max(12, int(self.base_height * 0.04)))
 
         btn_play = styled_tile_button("Играть", self.tile_w, self.tile_h, self.font_px)
         btn_settings = styled_tile_button(
@@ -351,15 +459,15 @@ class MainWindow(QtWidgets.QMainWindow):
         lvl_page = QtWidgets.QWidget()
         ll = QtWidgets.QVBoxLayout(lvl_page)
         ll.setAlignment(QtCore.Qt.AlignCenter)
-        ll.setSpacing(max(10, int(self.win_height * 0.03)))
+        ll.setSpacing(max(10, int(self.base_height * 0.03)))
         lbl = QtWidgets.QLabel("Выберите уровень")
         lbl.setAlignment(QtCore.Qt.AlignCenter)
         lbl.setStyleSheet(f"font-size:{max(14, int(self.font_px * 1.0))}px;")
         ll.addWidget(lbl)
 
         row = QtWidgets.QHBoxLayout()
-        row.setSpacing(max(12, int(self.win_width * 0.02)))
-        level_btn_size = max(96, int(min(self.win_width, self.win_height) * 0.16))
+        row.setSpacing(max(12, int(self.base_width * 0.02)))
+        level_btn_size = max(96, int(min(self.base_width, self.base_height) * 0.16))
         level_font = max(14, int(level_btn_size * 0.35))
         for i in range(1, 5):
             b = styled_tile_button(str(i), level_btn_size, level_btn_size, level_font)
@@ -378,7 +486,7 @@ class MainWindow(QtWidgets.QMainWindow):
         settings_page = QtWidgets.QWidget()
         sl = QtWidgets.QVBoxLayout(settings_page)
         sl.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignHCenter)
-        sl.setSpacing(max(12, int(self.win_height * 0.03)))
+        sl.setSpacing(max(12, int(self.base_height * 0.03)))
         lbls = QtWidgets.QLabel("Настройки")
         lbls.setAlignment(QtCore.Qt.AlignCenter)
         lbls.setStyleSheet(f"font-size:{max(14, int(self.font_px * 1.0))}px;")
@@ -387,6 +495,16 @@ class MainWindow(QtWidgets.QMainWindow):
             "Открыть окно камеры", self.tile_w, self.tile_h, self.font_px
         )
         sl.addWidget(open_cam_btn, alignment=QtCore.Qt.AlignCenter)
+
+        debug_layout = QtWidgets.QHBoxLayout()
+        debug_label = QtWidgets.QLabel("Режим дебаггинга:")
+        self.debug_checkbox = QtWidgets.QCheckBox()
+        self.debug_checkbox.setChecked(self.debug_enabled)
+        self.debug_checkbox.stateChanged.connect(self.toggle_debug_mode)
+        debug_layout.addWidget(debug_label)
+        debug_layout.addWidget(self.debug_checkbox)
+        debug_layout.addStretch()
+        sl.addLayout(debug_layout)
 
         back2 = styled_tile_button("Назад", self.tile_w, self.tile_h, self.font_px)
         back2.clicked.connect(lambda: self.stack.setCurrentIndex(0))
@@ -400,25 +518,42 @@ class MainWindow(QtWidgets.QMainWindow):
             " ну или можно просто удалить"
         )
         info.setStyleSheet("color:red")
-        main_layout.addWidget(info)
-        self.setCentralWidget(central)
+        main_content_layout.addWidget(info)
 
-        # связи кнопок - показываем нужные страницы или выполняем действия
+        self.main_layout.addWidget(self.main_content, stretch=2)
+
+        self.debug_window = DebugWindow()
+        self.main_layout.addWidget(self.debug_window, stretch=1)
+
+        self.setCentralWidget(main_container)
+
         btn_play.clicked.connect(lambda: self.stack.setCurrentIndex(1))
         btn_settings.clicked.connect(lambda: self.stack.setCurrentIndex(2))
         btn_exit.clicked.connect(self.safe_exit)
         open_cam_btn.clicked.connect(self.open_camera_window)
 
-    # Возвращает обработчик для кнопки уровня.
-    # - Если уже открыт игровой экран - просто активируем его.
-    # - Иначе создаём новое окно, подписываемся на closed и показываем.
+        self.debug_window.set_debug_enabled(self.debug_enabled)
+
+    def toggle_debug_mode(self, state):
+        self.debug_enabled = (state == QtCore.Qt.Checked)
+        self.debug_window.set_debug_enabled(self.debug_enabled)
+        self.update_window_size()
+
     def _make_level_click_handler(self, level):
         def handler():
+            if self._camera_window and self._camera_window.isVisible():
+                QtWidgets.QMessageBox.warning(self, "Внимание",
+                                              "Сначала закройте окно камеры!")
+                return
+
             if self._game_window and self._game_window.isVisible():
                 self._game_window.raise_()
                 self._game_window.activateWindow()
                 return
-            base_size = QtCore.QSize(self.win_width, self.win_height)
+
+            self.main_content.setEnabled(False)
+
+            base_size = QtCore.QSize(self.base_width, self.base_height)
             gw = GameWindow(
                 base_size,
                 level,
@@ -441,15 +576,24 @@ class MainWindow(QtWidgets.QMainWindow):
     # Здесь обнуляем ссылку на игровое окно, когда оно закрылось.
     def _on_game_window_closed(self):
         self._game_window = None
+        self.main_content.setEnabled(True)
 
     # Открывает окно камеры - один экземпляр одновременно.
     # Если окно уже запущено, поднимаем его на передний план.
     def open_camera_window(self):
+        if self._game_window and self._game_window.isVisible():
+            QtWidgets.QMessageBox.warning(self, "Внимание",
+                                          "Сначала закройте игровое окно!")
+            return
+
         if self._camera_window and self._camera_window.isVisible():
             self._camera_window.raise_()
             self._camera_window.activateWindow()
             return
-        base_size = QtCore.QSize(self.win_width, self.win_height)
+
+        self.main_content.setEnabled(False)
+
+        base_size = QtCore.QSize(self.base_width, self.base_height)
         self._camera_window = CameraWindow(
             base_size, self.child_back_w, self.child_back_h, self.child_back_font
         )
@@ -474,6 +618,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # Убираем ссылку на окно камеры после его закрытия.
     def _on_camera_closed(self):
         self._camera_window = None
+        self.main_content.setEnabled(True)
 
     # Безопасный выход:
     # - если есть открытые дочерние окна, закрываем их
