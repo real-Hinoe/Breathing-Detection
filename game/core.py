@@ -1,7 +1,8 @@
 from PyQt5.QtWidgets import QWidget
 from PyQt5.QtCore import Qt, QTimer, QRectF
 from PyQt5.QtGui import QPainter
-from .config import ACCEL, MAX_SPEED, TICK_HZ, GRAVITY, JUMP_SPEED
+
+from .config import MAX_SPEED, TICK_HZ, GRAVITY, JUMP_SPEED
 from .entities import Player
 
 
@@ -35,25 +36,14 @@ class GameCanvas(QWidget):
 
     def _tick(self):
         p = self.player
-        ax = 0.0
 
-        moving = False
+        # --- Горизонтальное управление БЕЗ ускорения ---
         if Qt.Key_A in self.keys or Qt.Key_Left in self.keys:
-            ax -= ACCEL
-            moving = True
-        if Qt.Key_D in self.keys or Qt.Key_Right in self.keys:
-            ax += ACCEL
-            moving = True
-
-        # Замедление при отпускании
-        if not moving:
-            if abs(p.vx) < 20:
-                p.vx = 0
-            else:
-                p.vx *= 0.85
-
-        # Применяем горизонтальное ускорение к скорости
-        p.vx += ax * self.dt
+            p.vx = -MAX_SPEED
+        elif Qt.Key_D in self.keys or Qt.Key_Right in self.keys:
+            p.vx = MAX_SPEED
+        else:
+            p.vx = 0
 
         if self.with_gravity:
             # Прыжок
@@ -65,8 +55,10 @@ class GameCanvas(QWidget):
                 p.vy = -JUMP_SPEED
                 p.grounded = False
 
+            # Гравитация
             p.vy += GRAVITY * self.dt
 
+            # Интеграция движения
             p.x += p.vx * self.dt
             p.y += p.vy * self.dt
 
@@ -93,6 +85,7 @@ class GameCanvas(QWidget):
                 p.vy = 0
                 p.grounded = True
         else:
+            # режим без гравитации — просто двигаем по X
             p.x += p.vx * self.dt
 
         # Ограничиваем скорость
