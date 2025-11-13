@@ -1,6 +1,10 @@
+import logging
 from PyQt5 import QtWidgets, QtCore, QtGui
+from log_handler import MODULE_NAMES, LogHandler
 from game.core import GameCanvas
 import cam
+
+logger = logging.getLogger(__name__)
 
 
 # Центрирует виджет на экране.
@@ -91,6 +95,14 @@ class DebugWindow(QtWidgets.QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.debug_enabled = True
+        self.log_text = None
+
+        # Создаём обработчик логирования
+        self.log_handler = LogHandler()
+        # Подключаем обработчик ко всем логгерам
+        for name in MODULE_NAMES:
+            logging.getLogger(name).addHandler(self.log_handler)
+
         self.init_ui()
 
     def init_ui(self):
@@ -114,6 +126,7 @@ class DebugWindow(QtWidgets.QWidget):
                 font-size: 12px;
             }
         """)
+        self.log_handler.set_text_edit(self.log_text)
         layout.addWidget(self.log_text, stretch=1)
 
         button_layout = QtWidgets.QHBoxLayout()
@@ -163,11 +176,6 @@ class DebugWindow(QtWidgets.QWidget):
         if text:
             clipboard = QtWidgets.QApplication.clipboard()
             clipboard.setText(text)
-
-    def add_log(self, message):
-        if self.debug_enabled:
-            timestamp = QtCore.QDateTime.currentDateTime().toString("hh:mm:ss")
-            self.log_text.append(f"[{timestamp}] {message}")
 
     def set_debug_enabled(self, enabled):
         self.debug_enabled = enabled
@@ -533,6 +541,8 @@ class MainWindow(QtWidgets.QMainWindow):
         open_cam_btn.clicked.connect(self.open_camera_window)
 
         self.debug_window.set_debug_enabled(self.debug_enabled)
+
+        logger.info("GUI initialized")
 
     def toggle_debug_mode(self, state):
         self.debug_enabled = (state == QtCore.Qt.Checked)

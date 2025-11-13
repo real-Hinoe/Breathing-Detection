@@ -1,13 +1,11 @@
 import platform
 import logging
-import sys
 import cv2
 from PyQt5.QtCore import QThread, Qt, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(stream=sys.stdout, level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 class VideoThread(QThread):
     """Отдельный поток для захвата кадров с камеры.
@@ -49,15 +47,15 @@ class VideoThread(QThread):
         # данный кусок кода нужен, чтобы программа не крашнулась при попытке
         # запустить камеру, когда библиотека еще не успела загрузиться.
 
-        logging.info("loading mediapipe...")
+        logger.info("Loading Mediapipe...")
         # Импорт HandsDetection (MediaPipe)
         try:
             from detection import HandsDetection
             self.import_success = True
             self.processor = HandsDetection()
-            logging.info("mediapipe loaded")
+            logger.info("Mediapipe loaded")
         except Exception as e:
-            logging.exception(f"Failed to load!\n{e}")
+            logger.exception(f"Failed to load!\n{e}")
 
         if not cap.isOpened():
             cap.release()
@@ -137,6 +135,7 @@ class CameraController:
         self.thread.change_pixmap_signal.connect(self.on_frame)
         self.thread.detection_desc_signal.connect(self.on_detection)
         self.thread.start()
+        logger.info("Video capture started")
 
     def stop(self):
         """Останавливает поток и очищает QLabel."""
@@ -147,6 +146,7 @@ class CameraController:
                 pass
             self.thread.stop()
             self.thread = None
+            logger.info("Video capture stopped")
         if hasattr(self.label, "setPixmap"):
             self.label.setPixmap(QPixmap())
 

@@ -59,7 +59,6 @@ class HandsDetection:
                     self.npDraw.draw_landmarks(img, handLms,
                                                self.mpHands.HAND_CONNECTIONS)
 
-        result = 0
         if self.found_lms == 0:
             result = 0  # не обнаружено ладоней
         elif self.found_lms == 21:

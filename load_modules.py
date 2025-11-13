@@ -6,18 +6,16 @@ import sys
 # только долго запускающиеся библиотеки
 modules_to_load = ['mediapipe']
 logger = logging.getLogger(__name__)
-logging.basicConfig(stream=sys.stdout, level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-def do_import(module_name):
+def do_import(module_name: str):
     """Функция, запускающаяся с атрибутом имени импортируемого модуля
     """
     thismodule = sys.modules[__name__]
 
     module = importlib.import_module(module_name)
     setattr(thismodule, module_name, module)
-    logger.info(f"{module_name} imported")
+    logger.info(f"{module_name.capitalize()} imported")
 
 
 executor = ThreadPoolExecutor()
