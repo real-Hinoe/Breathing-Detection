@@ -48,11 +48,11 @@ class VideoThread(QThread):
         # запустить камеру, когда библиотека еще не успела загрузиться.
 
         logger.info("Loading Mediapipe...")
-        # Импорт HandsDetection (MediaPipe)
+        # Импорт RibCageDetection (MediaPipe)
         try:
-            from detection import HandsDetection
+            from detection import RibCageDetection
             self.import_success = True
-            self.processor = HandsDetection()
+            self.processor = RibCageDetection(frame_skip=2)
             logger.info("Mediapipe loaded")
         except Exception as e:
             logger.exception(f"Failed to load!\n{e}")
@@ -72,19 +72,15 @@ class VideoThread(QThread):
 
             if self.import_success:
                 # BGR numpy array & кол-во ладоней
-                processed, n_hands = self.processor.find_hands(cv_img)
+                processed, result = self.processor.process(cv_img)
             else:
                 # в случае ошибки просто отправляем сырой кадр
-                processed, n_hands = cv_img, -1
+                processed, result = cv_img, False
 
-            if n_hands == 0:
-                self.detection_desc_signal.emit("Не обнаружено ладоней")
-            elif n_hands == 1:
-                self.detection_desc_signal.emit("Обнаружена одна ладонь")
-            elif n_hands == 2:
-                self.detection_desc_signal.emit("Обнаружено две ладони")
+            if result:
+                self.detection_desc_signal.emit("DETECTED")
             else:
-                self.detection_desc_signal.emit("Undefined")
+                self.detection_desc_signal.emit("NONE")
 
             # Конвертация в QPixmap
             pix = convert_cv_qt(processed).scaled(
