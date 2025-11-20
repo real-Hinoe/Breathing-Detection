@@ -30,6 +30,7 @@ class Player:
     h: int = 48
     grounded: bool = False
     sprites: Dict[str, QPixmap] = None
+    facing: int = 1
 
     def load_sprites(self):
         self.sprites = {}

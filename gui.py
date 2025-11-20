@@ -1,8 +1,10 @@
 import logging
 from PyQt5 import QtWidgets, QtCore, QtGui
 from log_handler import MODULE_NAMES, LogHandler
-from game.core import GameCanvas
+from game.pygame_thread import PygameThread
 import cam
+from multiprocessing import Process
+from game.pygame_canvas import run_pygame_level
 
 logger = logging.getLogger(__name__)
 
@@ -319,7 +321,8 @@ class CameraWindow(QtWidgets.QMainWindow):
         if self.camera is None:
             target = self.video_holder.inner_widget()
             self.camera = cam.CameraController(
-                target_label=target, description_label=self.info_label)
+                target_label=target, description_label=self.info_label
+            )
         self.camera.start()
         if self.info_label:
             self.info_label.setText("Ожидание запуска камеры...")
@@ -370,6 +373,7 @@ class GameWindow(QtWidgets.QMainWindow):
             back_font=12,
     ):
         super().__init__(parent)
+        self.pg_thread = None
         self.btn_back = None
         self.status_label = None
         self.game_holder = None
@@ -386,46 +390,24 @@ class GameWindow(QtWidgets.QMainWindow):
     # - кнопка "Вернуться" — по правому-низу.
     def init_ui(self, base_size):
         w, h = base_size.width(), base_size.height()
+
+        # Просто текст "Идёт запуск игры..."
         central = QtWidgets.QWidget()
         vbox = QtWidgets.QVBoxLayout(central)
         vbox.setContentsMargins(0, 0, 0, 0)
-        vbox.setSpacing(0)
 
-        self.game_holder = AspectLabel(bg_color=QtGui.QColor(240, 240, 240))
-        inner = self.game_holder.inner_widget()
-        inner.setText("")  # убираем текст
-        layout = QtWidgets.QVBoxLayout(inner)
-        layout.setContentsMargins(0, 0, 0, 0)
-        self.canvas = GameCanvas(
-            parent=inner, with_gravity=True
-        )  # или False, как у тебя задумано
-        layout.addWidget(self.canvas)
-        # ключевые 3 строки:
-        inner.setFocusPolicy(QtCore.Qt.StrongFocus)
-        inner.setFocusProxy(self.canvas)  # все нажатия фокуса проксируются в канву
-        self.canvas.setFocus()  # и сразу отдаём фокус канве
-        layout.addWidget(self.canvas)
-        self.canvas.setFocus()
-        vbox.addWidget(self.game_holder, stretch=9)
-
-        bottom = QtWidgets.QFrame()
-        bottom.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        bottom.setMinimumHeight(max(24, int(h * 0.1)))
-        bl = QtWidgets.QHBoxLayout(bottom)
-        bl.setContentsMargins(8, 4, 8, 4)
-        # Тут будут отображаться игровые значения или результаты анализа дыхания
-        self.status_label = QtWidgets.QLabel(
-            "Тут игровые значения и/или информация о правильности дыхания"
-        )
-        bl.addWidget(self.status_label)
-        vbox.addWidget(bottom, stretch=1)
+        label = QtWidgets.QLabel(f"Запуск уровня {self.level}...")
+        label.setAlignment(QtCore.Qt.AlignCenter)
+        label.setStyleSheet("font-size: 20px; font-weight: bold;")
+        vbox.addWidget(label)
 
         self.setCentralWidget(central)
-        # фиксируем размер окна
         self.setFixedSize(w, h)
 
-        # кнопка возврата - позиционируем в правом-низу,
-        # используем width/height окна, чтобы позиция не уезжала
+        # БЕЗ GameCanvas !!!  ⬇⬇⬇
+        QtCore.QTimer.singleShot(100, self.start_pygame_level)
+
+        # Кнопка "Назад"
         self.btn_back = styled_tile_button(
             "Вернуться",
             self._back_btn_w,
@@ -437,11 +419,31 @@ class GameWindow(QtWidgets.QMainWindow):
         bx = self.width() - self._back_btn_w - margin
         by = self.height() - self._back_btn_h - margin
         self.btn_back.move(bx, by)
-        self.btn_back.show()
-        # при нажатии - закрываем окно и эмитим сигнал closed
         self.btn_back.clicked.connect(self._on_back_clicked)
+        self.btn_back.show()
+
+    def start_pygame_level(self):
+        """Запускает pygame-игру в отдельном QThread."""
+        if self.pg_thread is not None and self.pg_thread.isRunning():
+            return
+        self.pg_thread = PygameThread(self.level)
+        self.pg_thread.finished.connect(self._on_pygame_finished)
+        self.pg_thread.start()
+
+    def _on_pygame_finished(self):
+        """Слот, вызываемый после завершения pygame-цикла."""
+        self.pg_thread = None
+        if self.status_label:
+            self.status_label.setText("Игра завершена")
 
     def _on_back_clicked(self):
+        # завершаем pygame-процесс у родителя
+        mw = self.parent()
+        if mw and mw._game_window:
+            mw._game_window.terminate()
+            mw._game_window.join()
+            mw._game_window = None
+
         self.close()
         self.closed.emit()
 
@@ -625,41 +627,27 @@ class MainWindow(QtWidgets.QMainWindow):
         logger.info("GUI initialized")
 
     def toggle_debug_mode(self, state):
-        self.debug_enabled = (state == QtCore.Qt.Checked)
+        self.debug_enabled = state == QtCore.Qt.Checked
         self.debug_window.set_debug_enabled(self.debug_enabled)
         self.update_window_size()
 
     def _make_level_click_handler(self, level):
         def handler():
             if self._camera_window and self._camera_window.isVisible():
-                QtWidgets.QMessageBox.warning(self, "Внимание",
-                                              "Сначала закройте окно камеры!")
+                QtWidgets.QMessageBox.warning(
+                    self, "Внимание", "Сначала закройте окно камеры!"
+                )
                 return
 
-            if self._game_window and self._game_window.isVisible():
-                self._game_window.raise_()
-                self._game_window.activateWindow()
+            # если игра уже запущена — не открываем вторую
+            if self._game_window:
                 return
 
-            self.main_content.setEnabled(False)
+            # запускаем pygame в отдельном процессе
+            p = Process(target=run_pygame_level, args=(level,))
+            p.start()
 
-            base_size = QtCore.QSize(self.base_width, self.base_height)
-            gw = GameWindow(
-                base_size,
-                level,
-                self,
-                self.child_back_w,
-                self.child_back_h,
-                self.child_back_font,
-            )
-            # при закрытии игрового окна main window должен убрать ссылку на него
-            gw.closed.connect(self._on_game_window_closed)
-            gw.setFixedSize(base_size.width(), base_size.height())
-            center_widget_on_screen(gw, base_size.width(), base_size.height())
-            gw.show()
-            gw.raise_()
-            gw.activateWindow()
-            self._game_window = gw
+            self._game_window = p
 
         return handler
 
@@ -671,12 +659,13 @@ class MainWindow(QtWidgets.QMainWindow):
     # Открывает окно камеры - один экземпляр одновременно.
     # Если окно уже запущено, поднимаем его на передний план.
     def open_camera_window(self):
-        if self._game_window and self._game_window.isVisible():
-            QtWidgets.QMessageBox.warning(self, "Внимание",
-                                          "Сначала закройте игровое окно!")
+        if self._game_window:
+            QtWidgets.QMessageBox.warning(
+                self, "Внимание", "Сначала закройте игровое окно!"
+            )
             return
 
-        if self._camera_window and self._camera_window.isVisible():
+        if self._camera_window:
             self._camera_window.raise_()
             self._camera_window.activateWindow()
             return
@@ -715,7 +704,9 @@ class MainWindow(QtWidgets.QMainWindow):
     # - затем вызываем quit приложения.
     def safe_exit(self):
         if self._game_window:
-            self._game_window.close()
+            self._game_window.terminate()
+            self._game_window.join()
+            self._game_window = None
         if self._camera_window:
             self._camera_window.close()
         QtWidgets.QApplication.instance().quit()
