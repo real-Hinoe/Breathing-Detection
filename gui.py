@@ -88,6 +88,50 @@ def styled_tile_button(text, width, height, font_px, parent=None):
     return btn
 
 
+# ResizableTextEdit - переопределенный QTextEdit с возможностью изменения ширины
+class ResizableTextEdit(QtWidgets.QTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._resizing = False
+        self._resize_edge_width = 5  # Ширина области захвата для изменения размера
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton:
+            # Проверяем, находится ли курсор у правой границы
+            if self.width() - event.pos().x() <= self._resize_edge_width:
+                self._resizing = True
+                self.setCursor(QtCore.Qt.SizeHorCursor)
+                return
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._resizing:
+            # Изменяем ширину родительского виджета (DebugWindow)
+            parent = self.parent()
+            if parent:
+                new_width = event.globalPos().x() - parent.mapToGlobal(QtCore.QPoint(0, 0)).x()
+                if new_width > 100:  # Минимальная ширина
+                    # Получаем текущую геометрию родителя
+                    geometry = parent.geometry()
+                    parent.setGeometry(geometry.x(), geometry.y(), new_width, geometry.height())
+        else:
+            # Проверяем, находится ли курсор у правой границы
+            if self.width() - event.pos().x() <= self._resize_edge_width:
+                self.setCursor(QtCore.Qt.SizeHorCursor)
+            else:
+                self.setCursor(QtCore.Qt.IBeamCursor)
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == QtCore.Qt.LeftButton and self._resizing:
+            self._resizing = False
+            self.setCursor(QtCore.Qt.IBeamCursor)
+
+        super().mouseReleaseEvent(event)
+
+
 # DebugWindow
 # - Окно дебаггинга, которое пришивается к главному окну сбоку
 # - Занимает 1/3 ширины главного окна, всегда присутствует при включенном режиме дебаггинга
@@ -108,13 +152,13 @@ class DebugWindow(QtWidgets.QWidget):
     def init_ui(self):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
+        layout.setSpacing(12)
 
         title = QtWidgets.QLabel("Окно дебаггинга")
-        title.setStyleSheet("font-weight: bold; font-size: 14px; color: #333;")
+        title.setStyleSheet("font-weight: bold; font-size: 28px; color: #333;")
         layout.addWidget(title)
 
-        self.log_text = QtWidgets.QTextEdit()
+        self.log_text = ResizableTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setStyleSheet("""
             QTextEdit {
@@ -123,7 +167,7 @@ class DebugWindow(QtWidgets.QWidget):
                 border-radius: 4px;
                 padding: 8px;
                 font-family: 'Courier New', monospace;
-                font-size: 12px;
+                font-size: 24px;
             }
         """)
         self.log_handler.set_text_edit(self.log_text)
@@ -132,6 +176,7 @@ class DebugWindow(QtWidgets.QWidget):
         button_layout = QtWidgets.QHBoxLayout()
 
         self.copy_btn = QtWidgets.QPushButton("Скопировать")
+        self.copy_btn.setFixedHeight(40)
         self.copy_btn.setStyleSheet("""
             QPushButton {
                 background-color: #007bff;
@@ -139,7 +184,7 @@ class DebugWindow(QtWidgets.QWidget):
                 border: none;
                 padding: 6px 12px;
                 border-radius: 4px;
-                font-size: 12px;
+                font-size: 20px;
             }
             QPushButton:hover {
                 background-color: #0069d9;
@@ -147,6 +192,7 @@ class DebugWindow(QtWidgets.QWidget):
         """)
 
         self.clear_btn = QtWidgets.QPushButton("Очистить")
+        self.clear_btn.setFixedHeight(40)
         self.clear_btn.setStyleSheet("""
             QPushButton {
                 background-color: #6c757d;
@@ -154,7 +200,7 @@ class DebugWindow(QtWidgets.QWidget):
                 border: none;
                 padding: 6px 12px;
                 border-radius: 4px;
-                font-size: 12px;
+                font-size: 20px;
             }
             QPushButton:hover {
                 background-color: #5a6268;
@@ -176,6 +222,22 @@ class DebugWindow(QtWidgets.QWidget):
         if text:
             clipboard = QtWidgets.QApplication.clipboard()
             clipboard.setText(text)
+
+            # Визуальный отклик на копирование
+            original_style = self.copy_btn.styleSheet()
+            self.copy_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #28a745;
+                    color: white;
+                    border: none;
+                    padding: 6px 12px;
+                    border-radius: 4px;
+                    font-size: 20px;
+                }
+            """)
+
+            # Возвращаем исходный стиль через 500 мс
+            QtCore.QTimer.singleShot(500, lambda: self.copy_btn.setStyleSheet(original_style))
 
     def set_debug_enabled(self, enabled):
         self.debug_enabled = enabled
@@ -299,13 +361,13 @@ class GameWindow(QtWidgets.QMainWindow):
     closed = QtCore.pyqtSignal()
 
     def __init__(
-        self,
-        base_size: QtCore.QSize,
-        level: int = 1,
-        parent=None,
-        back_btn_w=120,
-        back_btn_h=40,
-        back_font=12,
+            self,
+            base_size: QtCore.QSize,
+            level: int = 1,
+            parent=None,
+            back_btn_w=120,
+            back_btn_h=40,
+            back_font=12,
     ):
         super().__init__(parent)
         self.btn_back = None
@@ -383,6 +445,11 @@ class GameWindow(QtWidgets.QMainWindow):
         self.close()
         self.closed.emit()
 
+    def closeEvent(self, event):
+        """При закрытии окна через крестик тоже эмитируем сигнал closed"""
+        self.closed.emit()
+        super().closeEvent(event)
+
 
 # MainWindow - главное окно с меню и страницами.
 # - Хранит ссылки на активные окна камеры и уровня, чтобы не открывать дубликаты.
@@ -424,9 +491,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def update_window_size(self):
         if self.debug_enabled:
-            self.setFixedSize(self.debug_width, self.debug_height)
+            # Минимальный размер: основной контент + 400px для дебага
+            min_width = self.base_width + 400
+            min_height = self.base_height
+
+            self.setMinimumSize(min_width, min_height)
+            self.setMaximumSize(16777215, 16777215)
+            self.resize(self.debug_width, self.debug_height)
         else:
-            self.setFixedSize(self.base_width, self.base_height)
+            # В не-дебаг режиме фиксируем размер
+            self.setMinimumSize(self.base_width, self.base_height)
+            self.setMaximumSize(self.base_width, self.base_height)
+            self.resize(self.base_width, self.base_height)
         center_widget_on_screen(self, self.width(), self.height())
 
     # Собираем интерфейс главного окна.
@@ -528,9 +604,13 @@ class MainWindow(QtWidgets.QMainWindow):
         info.setStyleSheet("color:red")
         main_content_layout.addWidget(info)
 
-        self.main_layout.addWidget(self.main_content, stretch=2)
+        # Основной контент фиксированной ширины
+        self.main_content.setFixedWidth(self.base_width)
+        self.main_layout.addWidget(self.main_content)
 
         self.debug_window = DebugWindow()
+        # Окно дебага растягиваемое
+        self.debug_window.setMinimumWidth(300)  # Минимальная ширина дебаг-окна
         self.main_layout.addWidget(self.debug_window, stretch=1)
 
         self.setCentralWidget(main_container)
