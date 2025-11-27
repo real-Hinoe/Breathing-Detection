@@ -486,6 +486,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._camera_window = None
         self._game_window = None
 
+        # Таймер для проверки состояния процесса игры
+        self.game_timer = QtCore.QTimer()
+        self.game_timer.setInterval(500)
+        self.game_timer.timeout.connect(self._check_game_process)
+
         self.init_ui()
         # ставим окно по центру и фиксируем его размер
         self.update_window_size()
@@ -649,7 +654,26 @@ class MainWindow(QtWidgets.QMainWindow):
 
             self._game_window = p
 
+            # Блокируем главное окно и запускаем таймер проверки
+            self.setEnabled(False)
+            self.game_timer.start()
+
         return handler
+
+    def _check_game_process(self):
+        """Проверяет, жив ли процесс игры. Если нет — разблокирует окно."""
+        if self._game_window:
+            if not self._game_window.is_alive():
+                self._game_window.join()
+                self._game_window = None
+                self.game_timer.stop()
+                self.setEnabled(True)
+                self.activateWindow()
+                self.raise_()
+        else:
+            # Если окна нет, а таймер тикает (странно, но бывает)
+            self.game_timer.stop()
+            self.setEnabled(True)
 
     # Здесь обнуляем ссылку на игровое окно, когда оно закрылось.
     def _on_game_window_closed(self):

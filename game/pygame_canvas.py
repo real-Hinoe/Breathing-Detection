@@ -35,12 +35,12 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
 
     # Без рамки, с двойной буферизацией и хардварным ускорением
     screen = pygame.display.set_mode(
-        (WIN_W, WIN_H), pygame.NOFRAME | pygame.HWSURFACE | pygame.DOUBLEBUF
+        (WIN_W, WIN_H), pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE
     )
     clock = pygame.time.Clock()
 
     # === ИГРОК ===
-    player = Player(x=200, y=300)
+    player = Player(x=200, y=0)
 
     # Загружаем PNG-спрайты напрямую для pygame
     sprite_cache = {
@@ -62,11 +62,13 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
     idle_surf = sprite_cache["idle"]
     player.w = idle_surf.get_width()
     player.h = idle_surf.get_height()
-    # --------------------------------------------------------
 
-    player.prev_x = player.x
-    player.prev_y = player.y
-    player.facing = 1
+    # Вычисляем реальный низ персонажа (без пустоты)
+    # get_bounding_rect возвращает прямоугольник, охватывающий непрозрачные пиксели
+    idle_rect = idle_surf.get_bounding_rect()
+    # Отступ от низа картинки до низа реальных пикселей
+    bottom_padding = player.h - idle_rect.bottom
+    # --------------------------------------------------------
 
     # === ПЛАТФОРМА ===
     platform_w = int(WIN_W * 0.7)
@@ -74,13 +76,17 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
     platform_y = WIN_H - PLATFORM_HEIGHT - PLATFORM_MARGIN
     platform_rect = pygame.Rect(platform_x, platform_y, platform_w, PLATFORM_HEIGHT)
 
+    # Ставим игрока ровно на платформу (учитывая отступ)
+    player.y = platform_y - player.h + bottom_padding
+    player.prev_y = player.y
+
+    player.prev_x = player.x
+    player.prev_y = player.y
+    player.facing = 1
+
     # === Интерполяция ===
     accumulator = 0.0
     prev_time = pygame.time.get_ticks() / 1000.0
-
-    # Кнопка закрытия
-    close_size = 40
-    close_rect = pygame.Rect(WIN_W - close_size - 10, 10, close_size, close_size)
 
     running = True
     while running:
@@ -108,10 +114,6 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
             if ev.type == pygame.KEYDOWN:
                 # ESC / Q тоже закрывают игру
                 if ev.key in (pygame.K_ESCAPE, pygame.K_q):
-                    running = False
-
-            if ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-                if close_rect.collidepoint(ev.pos):
                     running = False
 
         keys = pygame.key.get_pressed()
@@ -155,7 +157,8 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
                 player.x = WIN_W - player.w
 
             # Коллизия с платформой
-            foot_y = player.y + player.h
+            # Считаем координату "ног"
+            foot_y = player.y + player.h - bottom_padding
             on_platform = (
                 player.vy >= 0
                 and foot_y >= platform_y
@@ -165,13 +168,13 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
             )
 
             if on_platform:
-                player.y = platform_y - player.h
+                player.y = platform_y - player.h + bottom_padding
                 player.vy = 0
                 player.grounded = True
             else:
-                # пол внизу (ТУТ БЫЛА ОПЕЧАТКА: WIN_W → WIN_H)
-                if player.y + player.h >= WIN_H:
-                    player.y = WIN_H - player.h
+                # пол внизу
+                if player.y + player.h - bottom_padding >= WIN_H:
+                    player.y = WIN_H - player.h + bottom_padding
                     player.vy = 0
                     player.grounded = True
                 else:
@@ -214,26 +217,6 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
                 (0, 200, 200),
                 pygame.Rect(interp_x, interp_y, player.w, player.h),
             )
-
-        # Кнопка закрытия (крестик)
-        mouse_pos = pygame.mouse.get_pos()
-        hovering = close_rect.collidepoint(mouse_pos)
-        color = (230, 60, 60) if hovering else (180, 40, 40)
-        pygame.draw.rect(screen, color, close_rect, border_radius=8)
-        pygame.draw.line(
-            screen,
-            (255, 255, 255),
-            (close_rect.left + 10, close_rect.top + 10),
-            (close_rect.right - 10, close_rect.bottom - 10),
-            3,
-        )
-        pygame.draw.line(
-            screen,
-            (255, 255, 255),
-            (close_rect.left + 10, close_rect.bottom - 10),
-            (close_rect.right - 10, close_rect.top + 10),
-            3,
-        )
 
         pygame.display.flip()
 
