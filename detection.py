@@ -106,14 +106,6 @@ class RibCageDetection:
                                   self.found_points['bottom_y']
                               ),
                               (0, 255, 0), 2)
-                cv2.putText(img,
-                            "Chest",
-                            (
-                                self.found_points['left_x'],
-                                self.found_points['top_y'] - 10
-                            ),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.6, (0, 255, 0), 2)
 
         self.frame_idx += 1
 
