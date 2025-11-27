@@ -44,10 +44,10 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
 
     # Загружаем PNG-спрайты напрямую для pygame
     sprite_cache = {
-        "idle": pygame.image.load("resources/staying1.1.png").convert_alpha(),
-        "run": pygame.image.load("resources/jump_start1.1.png").convert_alpha(),
-        "jump_up": pygame.image.load("resources/jump_up1.1.png").convert_alpha(),
-        "jump_fall": pygame.image.load("resources/jump_fall1.1.png").convert_alpha(),
+        "idle": pygame.image.load("resources/staying.png").convert_alpha(),
+        "run": pygame.image.load("resources/jump_start.png").convert_alpha(),
+        "jump_up": pygame.image.load("resources/jump_up.png").convert_alpha(),
+        "jump_fall": pygame.image.load("resources/jump_fall.png").convert_alpha(),
     }
 
     # ---------- СКЕЙЛ СПРАЙТОВ + РАЗМЕРЫ ПЕРСОНАЖА ----------

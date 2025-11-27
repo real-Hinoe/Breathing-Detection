@@ -9,12 +9,12 @@ RES = (Path(__file__).resolve().parents[1] / "resources").resolve()
 
 # Список спрайтов персонажа
 SPRITE_FILES = {
-    "idle": "staying1.1.png",
-    "run": "jump_start1.1.png",
-    "jump_start": "jump_start1.1.png",
-    "jump_up": "jump_up1.1.png",
-    "jump_fall": "jump_fall1.1.png",
-    "jump_land": "jump_land1.1.png",
+    "idle": "staying.png",
+    "run": "jump_start.png",
+    "jump_start": "jump_start.png",
+    "jump_up": "jump_up.png",
+    "jump_fall": "jump_fall.png",
+    "jump_land": "jump_land.png",
 }
 
 TARGET_MAX_HEIGHT = 160  # Ограничиваем высоту спрайтов
