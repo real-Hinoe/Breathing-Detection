@@ -52,7 +52,7 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
 
     # ---------- СКЕЙЛ СПРАЙТОВ + РАЗМЕРЫ ПЕРСОНАЖА ----------
     # Подстрой коэффициент, если нужно изменить размер ниндзя
-    scale = 0.35
+    scale = 0.175
     for name, surf in sprite_cache.items():
         w = int(surf.get_width() * scale)
         h = int(surf.get_height() * scale)
@@ -68,6 +68,11 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
     idle_rect = idle_surf.get_bounding_rect()
     # Отступ от низа картинки до низа реальных пикселей
     bottom_padding = player.h - idle_rect.bottom
+
+    # Хитбокс для коллизий (уже, чем спрайт)
+    # Тело занимает около 40% ширины спрайта по центру
+    hitbox_w = int(player.w * 0.4)
+    hitbox_offset_x = (player.w - hitbox_w) // 2
     # --------------------------------------------------------
 
     # === ПЛАТФОРМА ===
@@ -76,7 +81,7 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
     platform_y = WIN_H - PLATFORM_HEIGHT - PLATFORM_MARGIN
     platform_rect = pygame.Rect(platform_x, platform_y, platform_w, PLATFORM_HEIGHT)
 
-    # Ставим игрока ровно на платформу (учитывая отступ)
+    # Ставим игрока ровно на платформу
     player.y = platform_y - player.h + bottom_padding
     player.prev_y = player.y
 
@@ -159,12 +164,16 @@ def run_pygame_level(level: int = 1, external_running_flag=None):
             # Коллизия с платформой
             # Считаем координату "ног"
             foot_y = player.y + player.h - bottom_padding
+
+            # Считаем хитбокс по X
+            current_hitbox_x = player.x + hitbox_offset_x
+
             on_platform = (
                 player.vy >= 0
                 and foot_y >= platform_y
                 and foot_y <= platform_y + PLATFORM_HEIGHT
-                and (player.x + player.w) > platform_x
-                and player.x < (platform_x + platform_w)
+                and (current_hitbox_x + hitbox_w) > platform_x
+                and current_hitbox_x < (platform_x + platform_w)
             )
 
             if on_platform:
