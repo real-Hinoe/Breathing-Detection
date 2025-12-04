@@ -1,7 +1,6 @@
 import logging
 from PyQt5 import QtWidgets, QtCore, QtGui
 from log_handler import MODULE_NAMES, LogHandler
-from game.pygame_thread import PygameThread
 import cam
 from multiprocessing import Process
 from game.pygame_canvas import run_pygame_level
@@ -255,6 +254,8 @@ class CameraWindow(QtWidgets.QMainWindow):
     """Окно, показывающее видеопоток и команды для пользователя."""
 
     closed = QtCore.pyqtSignal()
+    minimized = QtCore.pyqtSignal()
+    restored = QtCore.pyqtSignal()
 
     def __init__(self, base_size: QtCore.QSize, btn_w, btn_h, font_px, parent=None):
         super().__init__(parent)
@@ -263,9 +264,10 @@ class CameraWindow(QtWidgets.QMainWindow):
         self.info_label = None
         self.video_holder = None
         self.setWindowTitle("Окно калибровки (временно просто камера)")
-        # ставим флаг "поверх других окон" и убираем кнопки масштабирования
-        flags = self.windowFlags() | QtCore.Qt.WindowStaysOnTopHint
-        flags = flags & ~QtCore.Qt.WindowMinMaxButtonsHint
+        # Убираем флаг "поверх других окон" и добавляем кнопки сворачивания/разворачивания
+        flags = self.windowFlags()
+        flags = flags | QtCore.Qt.WindowMinMaxButtonsHint  # Добавляем кнопки сворачивания/разворачивания
+        flags = flags & ~QtCore.Qt.WindowStaysOnTopHint  # Убираем "поверх всех окон"
         self.setWindowFlags(flags)
         self.init_ui(base_size, btn_w, btn_h, font_px)
 
@@ -338,117 +340,28 @@ class CameraWindow(QtWidgets.QMainWindow):
         self.stop_camera()
         self.close()
 
+    def changeEvent(self, event):
+        """Обрабатывает события изменения состояния окна."""
+        if event.type() == QtCore.QEvent.WindowStateChange:
+            # Проверяем, было ли окно свернуто или восстановлено
+            if self.windowState() & QtCore.Qt.WindowMinimized:
+                logger.info("Окно камеры свернуто")
+                self.minimized.emit()
+            elif self.isVisible() and not (self.windowState() & QtCore.Qt.WindowMinimized):
+                logger.info("Окно камеры восстановлено")
+                self.restored.emit()
+        super().changeEvent(event)
+
     # При показе окна - поднимаем и активируем его.
     def show(self):
         """При показе окна автоматически запускаем камеру."""
         super().show()
-        self.raise_()
-        self.activateWindow()
         self.start_camera()
 
     # При закрытии - испускаем сигнал closed. Владелец (MainWindow) на это подписан.
     def closeEvent(self, event):
         """При закрытии окна останавливаем камеру."""
         self.stop_camera()
-        self.closed.emit()
-        super().closeEvent(event)
-
-
-# GameWindow
-# - Шаблон игрового окна.
-# - base_size: QtCore.QSize - размер окна; level - номер уровня.
-# - Есть верхняя игровая область (AspectLabel) и нижняя строка статуса.
-# - Кнопка "Вернуться" в правом-низу закрывает окно.
-# - При закрытии эмитится сигнал closed.
-class GameWindow(QtWidgets.QMainWindow):
-    closed = QtCore.pyqtSignal()
-
-    def __init__(
-            self,
-            base_size: QtCore.QSize,
-            level: int = 1,
-            parent=None,
-            back_btn_w=120,
-            back_btn_h=40,
-            back_font=12,
-    ):
-        super().__init__(parent)
-        self.pg_thread = None
-        self.btn_back = None
-        self.status_label = None
-        self.game_holder = None
-        self.level = level
-        self._back_btn_w = back_btn_w
-        self._back_btn_h = back_btn_h
-        self._back_font = back_font
-        self.setWindowTitle(f"Игра - уровень {level}")
-        self.init_ui(base_size)
-
-    # Собирает игровое окно:
-    # - AspectLabel сверху 9 частей,
-    # - строка статуса снизу 1 часть,
-    # - кнопка "Вернуться" — по правому-низу.
-    def init_ui(self, base_size):
-        w, h = base_size.width(), base_size.height()
-
-        # Просто текст "Идёт запуск игры..."
-        central = QtWidgets.QWidget()
-        vbox = QtWidgets.QVBoxLayout(central)
-        vbox.setContentsMargins(0, 0, 0, 0)
-
-        label = QtWidgets.QLabel(f"Запуск уровня {self.level}...")
-        label.setAlignment(QtCore.Qt.AlignCenter)
-        label.setStyleSheet("font-size: 20px; font-weight: bold;")
-        vbox.addWidget(label)
-
-        self.setCentralWidget(central)
-        self.setFixedSize(w, h)
-
-        # БЕЗ GameCanvas !!!  ⬇⬇⬇
-        QtCore.QTimer.singleShot(100, self.start_pygame_level)
-
-        # Кнопка "Назад"
-        self.btn_back = styled_tile_button(
-            "Вернуться",
-            self._back_btn_w,
-            self._back_btn_h,
-            self._back_font,
-            parent=self,
-        )
-        margin = 12
-        bx = self.width() - self._back_btn_w - margin
-        by = self.height() - self._back_btn_h - margin
-        self.btn_back.move(bx, by)
-        self.btn_back.clicked.connect(self._on_back_clicked)
-        self.btn_back.show()
-
-    def start_pygame_level(self):
-        """Запускает pygame-игру в отдельном QThread."""
-        if self.pg_thread is not None and self.pg_thread.isRunning():
-            return
-        self.pg_thread = PygameThread(self.level)
-        self.pg_thread.finished.connect(self._on_pygame_finished)
-        self.pg_thread.start()
-
-    def _on_pygame_finished(self):
-        """Слот, вызываемый после завершения pygame-цикла."""
-        self.pg_thread = None
-        if self.status_label:
-            self.status_label.setText("Игра завершена")
-
-    def _on_back_clicked(self):
-        # завершаем pygame-процесс у родителя
-        mw = self.parent()
-        if mw and mw._game_window:
-            mw._game_window.terminate()
-            mw._game_window.join()
-            mw._game_window = None
-
-        self.close()
-        self.closed.emit()
-
-    def closeEvent(self, event):
-        """При закрытии окна через крестик тоже эмитируем сигнал closed"""
         self.closed.emit()
         super().closeEvent(event)
 
@@ -482,13 +395,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.child_back_h = max(40, int(self.base_height * 0.08))
         self.child_back_font = max(12, int(self.child_back_h * 0.35))
 
-        # здесь храним единственный экземпляр окна камеры и единственный экземпляр игрового окна
+        # здесь храним единственный экземпляр окна камеры и процесс игры
         self._camera_window = None
-        self._game_window = None
+        self._game_process = None  # Процесс pygame
 
-        # Таймер для проверки состояния процесса игры
+        # Для отслеживания состояния дочерних окон
+        self._child_windows_minimized = False
+        self._main_window_was_minimized = False
+
+        # Флаг для блокировки кнопок окна
+        self._window_buttons_blocked = False
+
+        # Таймер для отслеживания состояния pygame окна
         self.game_timer = QtCore.QTimer()
-        self.game_timer.setInterval(500)
+        self.game_timer.setInterval(1000)  # Проверяем каждую секунду
         self.game_timer.timeout.connect(self._check_game_process)
 
         self.init_ui()
@@ -603,11 +523,8 @@ class MainWindow(QtWidgets.QMainWindow):
         sl.addWidget(back2, alignment=QtCore.Qt.AlignCenter)
         self.stack.addWidget(settings_page)
 
-        # место для логов/ошибок - пока просто красный текст
-        info = QtWidgets.QLabel(
-            "Тут будут отображаться всякие ошибки и сбои в программе,"
-            " ну или можно просто удалить"
-        )
+        # место для логов/ошибок - пока просто красный текст (пустой)
+        info = QtWidgets.QLabel("")
         info.setStyleSheet("color:red")
         main_content_layout.addWidget(info)
 
@@ -638,63 +555,66 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _make_level_click_handler(self, level):
         def handler():
+            # Проверяем, не открыто ли окно камеры
             if self._camera_window and self._camera_window.isVisible():
                 QtWidgets.QMessageBox.warning(
                     self, "Внимание", "Сначала закройте окно камеры!"
                 )
                 return
 
-            # если игра уже запущена — не открываем вторую
-            if self._game_window:
+            # Проверяем, не запущена ли уже игра
+            if self._game_process and self._game_process.is_alive():
+                QtWidgets.QMessageBox.warning(
+                    self, "Внимание", "Игра уже запущена!"
+                )
                 return
 
-            # запускаем pygame в отдельном процессе
-            p = Process(target=run_pygame_level, args=(level,))
-            p.start()
-
-            self._game_window = p
-
-            # Блокируем главное окно и запускаем таймер проверки
+            # Блокируем главное окно полностью
             self.setEnabled(False)
+            self._block_window_buttons(True)
+
+            # Запускаем pygame в отдельном процессе
+            self._game_process = Process(target=run_pygame_level, args=(level,))
+            self._game_process.start()
+
+            # Запускаем таймер для отслеживания процесса
             self.game_timer.start()
+
+            logger.info(f"Запущена игра уровня {level}")
 
         return handler
 
     def _check_game_process(self):
         """Проверяет, жив ли процесс игры. Если нет — разблокирует окно."""
-        if self._game_window:
-            if not self._game_window.is_alive():
-                self._game_window.join()
-                self._game_window = None
+        if self._game_process:
+            if not self._game_process.is_alive():
+                self._game_process.join()
+                self._game_process = None
                 self.game_timer.stop()
                 self.setEnabled(True)
-                self.activateWindow()
-                self.raise_()
+                self._block_window_buttons(False)
+                logger.info("Игра завершена, главное окно разблокировано")
         else:
-            # Если окна нет, а таймер тикает (странно, но бывает)
             self.game_timer.stop()
-            self.setEnabled(True)
-
-    # Здесь обнуляем ссылку на игровое окно, когда оно закрылось.
-    def _on_game_window_closed(self):
-        self._game_window = None
-        self.main_content.setEnabled(True)
 
     # Открывает окно камеры - один экземпляр одновременно.
     # Если окно уже запущено, поднимаем его на передний план.
     def open_camera_window(self):
-        if self._game_window:
+        # Проверяем, не запущена ли игра
+        if self._game_process and self._game_process.is_alive():
             QtWidgets.QMessageBox.warning(
                 self, "Внимание", "Сначала закройте игровое окно!"
             )
             return
 
-        if self._camera_window:
+        if self._camera_window and self._camera_window.isVisible():
             self._camera_window.raise_()
             self._camera_window.activateWindow()
             return
 
-        self.main_content.setEnabled(False)
+        # Блокируем главное окно полностью
+        self.setEnabled(False)
+        self._block_window_buttons(True)
 
         base_size = QtCore.QSize(self.base_width, self.base_height)
         self._camera_window = CameraWindow(
@@ -703,13 +623,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # кнопка в окне камеры возвращает сюда
         self._camera_window.btn_back.clicked.connect(self._camera_back_clicked)
         self._camera_window.closed.connect(self._on_camera_closed)
+        # Подключаем сигналы о сворачивании/восстановлении
+        self._camera_window.minimized.connect(self._on_child_minimized)
+        self._camera_window.restored.connect(self._on_child_restored)
+
         self._camera_window.setFixedSize(base_size.width(), base_size.height())
         center_widget_on_screen(
             self._camera_window, base_size.width(), base_size.height()
         )
         self._camera_window.show()
-        self._camera_window.raise_()
-        self._camera_window.activateWindow()
 
     # Закрытие окна камеры через кнопку "Вернуться"
     def _camera_back_clicked(self):
@@ -721,16 +643,109 @@ class MainWindow(QtWidgets.QMainWindow):
     # Убираем ссылку на окно камеры после его закрытия.
     def _on_camera_closed(self):
         self._camera_window = None
-        self.main_content.setEnabled(True)
+        self.setEnabled(True)
+        self._block_window_buttons(False)
+
+    def _on_child_minimized(self):
+        """Вызывается, когда дочернее окно (камера) сворачивается"""
+        logger.info("Дочернее окно свернуто - сворачиваем главное окно")
+        self._child_windows_minimized = True
+        # Запоминаем, было ли главное окно свернуто до этого
+        self._main_window_was_minimized = self.isMinimized()
+        # Сворачиваем главное окно
+        self.showMinimized()
+
+    def _on_child_restored(self):
+        """Вызывается, когда дочернее окно (камера) восстанавливается"""
+        logger.info("Дочернее окно восстановлено")
+        self._child_windows_minimized = False
+
+        # Активируем окно камеры, чтобы оно было поверх
+        if self._camera_window:
+            self._camera_window.raise_()
+            self._camera_window.activateWindow()
+
+    def changeEvent(self, event):
+        """Обрабатывает события изменения состояния окна"""
+        if event.type() == QtCore.QEvent.WindowStateChange:
+            if self.isMinimized():
+                # Главное окно свернулось
+                logger.info("Главное окно свернуто")
+                # Если у нас есть дочерние окна, свернуть их тоже
+                if self._camera_window and self._camera_window.isVisible():
+                    self._camera_window.showMinimized()
+            elif self.windowState() & QtCore.Qt.WindowMaximized:
+                # Главное окно развернулось
+                logger.info("Главное окно развернуто")
+            else:
+                # Главное окно восстановлено к нормальному размеру
+                logger.info("Главное окно восстановлено")
+        super().changeEvent(event)
+
+    def _block_window_buttons(self, block):
+        """Блокирует или разблокирует кнопки окна (закрыть, свернуть, развернуть)"""
+        self._window_buttons_blocked = block
+
+        if block:
+            # Блокируем кнопки окна
+            flags = self.windowFlags()
+            flags = flags & ~QtCore.Qt.WindowCloseButtonHint  # Убираем кнопку закрытия
+            flags = flags & ~QtCore.Qt.WindowMinimizeButtonHint  # Убираем кнопку свернуть
+            flags = flags & ~QtCore.Qt.WindowMaximizeButtonHint  # Убираем кнопку развернуть
+            self.setWindowFlags(flags)
+            self.show()  # Нужно перепоказать окно для применения изменений
+        else:
+            # Восстанавливаем кнопки окна
+            flags = self.windowFlags()
+            flags = flags | QtCore.Qt.WindowCloseButtonHint  # Возвращаем кнопку закрытия
+            flags = flags | QtCore.Qt.WindowMinimizeButtonHint  # Возвращаем кнопку свернуть
+            flags = flags | QtCore.Qt.WindowMaximizeButtonHint  # Возвращаем кнопку развернуть
+            self.setWindowFlags(flags)
+            self.show()  # Нужно перепоказать окно для применения изменений
+
+    def closeEvent(self, event):
+        """Переопределяем закрытие главного окна - блокируем, если открыты дочерние окна"""
+        # Проверяем, открыты ли дочерние окна или запущена ли игра
+        camera_open = self._camera_window and self._camera_window.isVisible()
+        game_running = self._game_process and self._game_process.is_alive()
+
+        if camera_open or game_running:
+            event.ignore()  # Игнорируем закрытие
+
+            # Показываем сообщение пользователю
+            if camera_open:
+                QtWidgets.QMessageBox.warning(
+                    self, "Внимание",
+                    "Сначала закройте окно камеры!"
+                )
+            elif game_running:
+                QtWidgets.QMessageBox.warning(
+                    self, "Внимание",
+                    "Сначала закройте игру!"
+                )
+
+            return
+
+        # Если дочерних окон нет, закрываем приложение
+        super().closeEvent(event)
 
     # Безопасный выход:
     # - если есть открытые дочерние окна, закрываем их
     # - затем вызываем quit приложения.
     def safe_exit(self):
-        if self._game_window:
-            self._game_window.terminate()
-            self._game_window.join()
-            self._game_window = None
-        if self._camera_window:
+        # Сначала закрываем окно камеры, если оно открыто
+        if self._camera_window and self._camera_window.isVisible():
             self._camera_window.close()
-        QtWidgets.QApplication.instance().quit()
+
+        # Затем останавливаем игру, если она запущена
+        if self._game_process and self._game_process.is_alive():
+            self._game_process.terminate()
+            self._game_process.join()
+            self._game_process = None
+
+        # Разблокируем кнопки окна перед выходом
+        self._block_window_buttons(False)
+
+        # Даем время на закрытие окон и выходим
+        QtCore.QTimer.singleShot(100, QtWidgets.QApplication.instance().quit)
+        logger.info("Приложение завершает работу")
