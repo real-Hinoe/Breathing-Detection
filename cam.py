@@ -7,6 +7,44 @@ from PyQt5.QtGui import QImage, QPixmap
 logger = logging.getLogger(__name__)
 
 
+def find_available_cameras():
+    """Находит и возвращает список доступных камер"""
+    cameras = []
+
+    # Пробуем открыть камеры с индексами от 0 до 10
+    for i in range(10):
+        cap = None
+        try:
+            is_mac = platform.system() == "Darwin"
+            backend = cv2.CAP_AVFOUNDATION if is_mac else cv2.CAP_DSHOW
+            cap = cv2.VideoCapture(i, backend)
+
+            if cap.isOpened():
+                # Пробуем прочитать кадр для проверки
+                ret, frame = cap.read()
+                if ret:
+                    # Получаем информацию о камере
+                    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+
+                    camera_info = {
+                        'index': i,
+                        'width': width,
+                        'height': height,
+                        'fps': fps if fps > 0 else 30
+                    }
+                    cameras.append(camera_info)
+                    logger.info(f"Найдена камера {i}: {width}x{height}@{fps}fps")
+        except Exception as e:
+            logger.warning(f"Ошибка при проверке камеры {i}: {e}")
+        finally:
+            if cap is not None:
+                cap.release()
+
+    return cameras
+
+
 class VideoThread(QThread):
     """Отдельный поток для захвата кадров с камеры.
     Использует OpenCV VideoCapture и отправляет кадры в главный поток через pyqtSignal.
@@ -42,10 +80,6 @@ class VideoThread(QThread):
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cap_height)
         except Exception:
             pass
-
-        # ВАЖНО: хоть у нас уже и загружена библиотека MediaPipe,
-        # данный кусок кода нужен, чтобы программа не крашнулась при попытке
-        # запустить камеру, когда библиотека еще не успела загрузиться.
 
         logger.info("Loading Mediapipe...")
         # Импорт RibCageDetection (MediaPipe)
@@ -131,7 +165,7 @@ class CameraController:
         self.thread.change_pixmap_signal.connect(self.on_frame)
         self.thread.detection_desc_signal.connect(self.on_detection)
         self.thread.start()
-        logger.info("Video capture started")
+        logger.info(f"Video capture started with camera index {self.cam_index}")
 
     def stop(self):
         """Останавливает поток и очищает QLabel."""

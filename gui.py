@@ -245,17 +245,11 @@ class DebugWindow(QtWidgets.QWidget):
         self.setVisible(enabled)
 
 
-# CameraWindow
-# - Окно-плейсхолдер под камеру/калибровку.
-# - base_size: QtCore.QSize - размер, который нужно использовать для окна.
-# - btn_w, btn_h, font_px - размеры и шрифт кнопки "Вернуться".
-# - Имеет сигнал closed, который испускается при закрытии окна.
+# CameraWindow - СТАРОЕ ОКНО КАМЕРЫ, КАК БЫЛО ИЗНАЧАЛЬНО
 class CameraWindow(QtWidgets.QMainWindow):
     """Окно, показывающее видеопоток и команды для пользователя."""
 
     closed = QtCore.pyqtSignal()
-    minimized = QtCore.pyqtSignal()
-    restored = QtCore.pyqtSignal()
 
     def __init__(self, base_size: QtCore.QSize, btn_w, btn_h, font_px, parent=None):
         super().__init__(parent)
@@ -285,7 +279,7 @@ class CameraWindow(QtWidgets.QMainWindow):
 
         self.game_holder = AspectLabel(bg_color=QtGui.QColor(240, 240, 240))
         self.video_holder = AspectLabel(bg_color=QtGui.QColor(220, 235, 255))
-        self.video_holder.inner_widget().setText("Плейсхолдер камеры\n(16:9)")
+        self.video_holder.inner_widget().setText("Плейсхолдер камеры(16:9)")
         vbox.addWidget(self.video_holder, stretch=9)
 
         bottom = QtWidgets.QFrame()
@@ -346,10 +340,8 @@ class CameraWindow(QtWidgets.QMainWindow):
             # Проверяем, было ли окно свернуто или восстановлено
             if self.windowState() & QtCore.Qt.WindowMinimized:
                 logger.info("Окно камеры свернуто")
-                self.minimized.emit()
             elif self.isVisible() and not (self.windowState() & QtCore.Qt.WindowMinimized):
                 logger.info("Окно камеры восстановлено")
-                self.restored.emit()
         super().changeEvent(event)
 
     # При показе окна - поднимаем и активируем его.
@@ -367,9 +359,6 @@ class CameraWindow(QtWidgets.QMainWindow):
 
 
 # MainWindow - главное окно с меню и страницами.
-# - Хранит ссылки на активные окна камеры и уровня, чтобы не открывать дубликаты.
-# - Размер главного окна - половина экрана, но не меньше 400x300.
-# - Использует QStackedWidget для переключения между меню/выбором уровня/настройками.
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -399,12 +388,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._camera_window = None
         self._game_process = None  # Процесс pygame
 
-        # Для отслеживания состояния дочерних окон
-        self._child_windows_minimized = False
-        self._main_window_was_minimized = False
-
-        # Флаг для блокировки кнопок окна
-        self._window_buttons_blocked = False
+        # Выбор камеры
+        self.camera_combo = None
+        self.selected_camera_index = 0
 
         # Таймер для отслеживания состояния pygame окна
         self.game_timer = QtCore.QTimer()
@@ -433,9 +419,6 @@ class MainWindow(QtWidgets.QMainWindow):
         center_widget_on_screen(self, self.width(), self.height())
 
     # Собираем интерфейс главного окна.
-    # - меню: Играть/Настройки/Выход,
-    # - выбор уровня: кнопки 1..4 и кнопка Назад,
-    # - настройки: кнопка открытия окна камеры и кнопка Назад.
     def init_ui(self):
         main_container = QtWidgets.QWidget()
         self.main_layout = QtWidgets.QHBoxLayout(main_container)
@@ -507,15 +490,57 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         sl.addWidget(open_cam_btn, alignment=QtCore.Qt.AlignCenter)
 
+        # --- НАСТРОЙКИ КАМЕРЫ ---
+        camera_group = QtWidgets.QGroupBox("Настройки камеры")
+        camera_group.setFixedWidth(self.tile_w)
+        camera_layout = QtWidgets.QVBoxLayout(camera_group)
+
+        camera_select_layout = QtWidgets.QHBoxLayout()
+        camera_label = QtWidgets.QLabel("Выберите камеру:")
+        self.camera_combo = QtWidgets.QComboBox()
+        self.camera_combo.setMinimumWidth(200)
+
+        # Находим доступные камеры
+        self.detect_available_cameras()
+
+        camera_select_layout.addWidget(camera_label)
+        camera_select_layout.addWidget(self.camera_combo, stretch=1)
+        camera_layout.addLayout(camera_select_layout)
+
+        # Кнопка обновления списка камер
+        refresh_btn = QtWidgets.QPushButton("Обновить список камер")
+        refresh_btn.clicked.connect(self.detect_available_cameras)
+        camera_layout.addWidget(refresh_btn)
+
+        sl.addWidget(camera_group, alignment=QtCore.Qt.AlignCenter)
+        # --- КОНЕЦ НАСТРОЕК КАМЕРЫ ---
+
+        # --- НАСТРОЙКИ ДЕБАГА ---
+        settings_group = QtWidgets.QGroupBox("Опции для разработчика")
+        settings_group.setFixedWidth(self.tile_w)
+        settings_layout = QtWidgets.QVBoxLayout(settings_group)
+
         debug_layout = QtWidgets.QHBoxLayout()
         debug_label = QtWidgets.QLabel("Режим дебаггинга:")
         self.debug_checkbox = QtWidgets.QCheckBox()
         self.debug_checkbox.setChecked(self.debug_enabled)
         self.debug_checkbox.stateChanged.connect(self.toggle_debug_mode)
         debug_layout.addWidget(debug_label)
-        debug_layout.addWidget(self.debug_checkbox)
         debug_layout.addStretch()
-        sl.addLayout(debug_layout)
+        debug_layout.addWidget(self.debug_checkbox)
+        settings_layout.addLayout(debug_layout)
+
+        hitbox_layout = QtWidgets.QHBoxLayout()
+        hitbox_label = QtWidgets.QLabel("Отрисовывать хитбокс:")
+        self.hitbox_checkbox = QtWidgets.QCheckBox()
+        self.hitbox_checkbox.setChecked(False)  # По умолчанию выключено
+        hitbox_layout.addWidget(hitbox_label)
+        hitbox_layout.addStretch()
+        hitbox_layout.addWidget(self.hitbox_checkbox)
+        settings_layout.addLayout(hitbox_layout)
+
+        sl.addWidget(settings_group, alignment=QtCore.Qt.AlignCenter)
+        # --- КОНЕЦ НАСТРОЕК ДЕБАГА ---
 
         back2 = styled_tile_button("Назад", self.tile_w, self.tile_h, self.font_px)
         back2.clicked.connect(lambda: self.stack.setCurrentIndex(0))
@@ -544,9 +569,60 @@ class MainWindow(QtWidgets.QMainWindow):
         btn_exit.clicked.connect(self.safe_exit)
         open_cam_btn.clicked.connect(self.open_camera_window)
 
+        # Подключаем выбор камеры
+        self.camera_combo.currentIndexChanged.connect(self.on_camera_changed)
+
         self.debug_window.set_debug_enabled(self.debug_enabled)
 
         logger.info("GUI initialized")
+
+    def detect_available_cameras(self):
+        """Определяет доступные камеры на устройстве"""
+        if self.camera_combo:
+            current_index = self.camera_combo.currentIndex()
+            current_data = self.camera_combo.currentData()
+        else:
+            current_index = -1
+            current_data = None
+
+        cameras = cam.find_available_cameras()
+        self.camera_combo.clear()
+
+        for cam_info in cameras:
+            index = cam_info['index']
+            if index == 0:
+                self.camera_combo.addItem(f"Встроенная камера", index)
+            else:
+                self.camera_combo.addItem(f"Внешняя камера {index}", index)
+
+        if not cameras:
+            self.camera_combo.addItem("Камеры не найдены", -1)
+
+        # Восстанавливаем предыдущий выбор, если возможно
+        if current_data is not None:
+            for i in range(self.camera_combo.count()):
+                if self.camera_combo.itemData(i) == current_data:
+                    self.camera_combo.setCurrentIndex(i)
+                    break
+
+        logger.info(f"Найдено {len(cameras)} камер")
+
+    def on_camera_changed(self, index):
+        """Обработчик изменения выбранной камеры"""
+        if index >= 0:
+            self.selected_camera_index = self.camera_combo.currentData()
+            if self.selected_camera_index >= 0:
+                logger.info(f"Выбрана камера с индексом {self.selected_camera_index}")
+                # Обновляем контроллер камеры, если окно камеры открыто
+                if self._camera_window and self._camera_window.camera:
+                    self._camera_window.stop_camera()
+                    target = self._camera_window.video_holder.inner_widget()
+                    self._camera_window.camera = cam.CameraController(
+                        target_label=target,
+                        description_label=self._camera_window.info_label,
+                        cam_index=self.selected_camera_index
+                    )
+                    self._camera_window.camera.start()
 
     def toggle_debug_mode(self, state):
         self.debug_enabled = state == QtCore.Qt.Checked
@@ -573,8 +649,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.setEnabled(False)
             self._block_window_buttons(True)
 
+            # Получаем состояние чекбокса для отрисовки хитбокса
+            draw_hitbox = self.hitbox_checkbox.isChecked()
+
             # Запускаем pygame в отдельном процессе
-            self._game_process = Process(target=run_pygame_level, args=(level,))
+            self._game_process = Process(target=run_pygame_level, args=(level, draw_hitbox))
             self._game_process.start()
 
             # Запускаем таймер для отслеживания процесса
@@ -623,9 +702,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # кнопка в окне камеры возвращает сюда
         self._camera_window.btn_back.clicked.connect(self._camera_back_clicked)
         self._camera_window.closed.connect(self._on_camera_closed)
-        # Подключаем сигналы о сворачивании/восстановлении
-        self._camera_window.minimized.connect(self._on_child_minimized)
-        self._camera_window.restored.connect(self._on_child_restored)
 
         self._camera_window.setFixedSize(base_size.width(), base_size.height())
         center_widget_on_screen(
@@ -645,47 +721,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._camera_window = None
         self.setEnabled(True)
         self._block_window_buttons(False)
-
-    def _on_child_minimized(self):
-        """Вызывается, когда дочернее окно (камера) сворачивается"""
-        logger.info("Дочернее окно свернуто - сворачиваем главное окно")
-        self._child_windows_minimized = True
-        # Запоминаем, было ли главное окно свернуто до этого
-        self._main_window_was_minimized = self.isMinimized()
-        # Сворачиваем главное окно
-        self.showMinimized()
-
-    def _on_child_restored(self):
-        """Вызывается, когда дочернее окно (камера) восстанавливается"""
-        logger.info("Дочернее окно восстановлено")
-        self._child_windows_minimized = False
-
-        # Активируем окно камеры, чтобы оно было поверх
-        if self._camera_window:
-            self._camera_window.raise_()
-            self._camera_window.activateWindow()
-
-    def changeEvent(self, event):
-        """Обрабатывает события изменения состояния окна"""
-        if event.type() == QtCore.QEvent.WindowStateChange:
-            if self.isMinimized():
-                # Главное окно свернулось
-                logger.info("Главное окно свернуто")
-                # Если у нас есть дочерние окна, свернуть их тоже
-                if self._camera_window and self._camera_window.isVisible():
-                    self._camera_window.showMinimized()
-            elif self.windowState() & QtCore.Qt.WindowMaximized:
-                # Главное окно развернулось
-                logger.info("Главное окно развернуто")
-            else:
-                # Главное окно восстановлено к нормальному размеру
-                logger.info("Главное окно восстановлено")
-        super().changeEvent(event)
+        logger.info("Окно камеры закрыто, главное окно разблокировано")
 
     def _block_window_buttons(self, block):
         """Блокирует или разблокирует кнопки окна (закрыть, свернуть, развернуть)"""
-        self._window_buttons_blocked = block
-
         if block:
             # Блокируем кнопки окна
             flags = self.windowFlags()

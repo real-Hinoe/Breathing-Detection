@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
+import pygame
 
 # Путь к папке ресурсов
 RES = (Path(__file__).resolve().parents[1] / "resources").resolve()
@@ -10,7 +11,7 @@ RES = (Path(__file__).resolve().parents[1] / "resources").resolve()
 # Список спрайтов персонажа
 SPRITE_FILES = {
     "idle": "staying.png",
-    "run": "jump_start.png",
+    "run": "running.png",
     "jump_start": "jump_start.png",
     "jump_up": "jump_up.png",
     "jump_fall": "jump_fall.png",
@@ -57,3 +58,19 @@ class Player:
         if state and state in self.sprites:
             return self.sprites[state]
         return self.sprites.get("idle")
+
+
+@dataclass
+class Platform:
+    """Класс для платформ с дополнительной информацией для физики"""
+    rect: pygame.Rect
+    is_slope: bool = False  # Наклонная платформа
+    slope_angle: float = 0.0  # Угол наклона в градусах
+
+    def get_collision_normal(self, player_rect: pygame.Rect) -> Tuple[float, float]:
+        """Возвращает нормаль поверхности в точке столкновения"""
+        if not self.is_slope:
+            return (0, -1)  # Вертикальная нормаль для горизонтальной поверхности
+
+        # Для наклонных поверхностей (пока не реализовано)
+        return (0, -1)

@@ -1,235 +1,243 @@
 import os
 import sys
 import pygame
-from .entities import Player
+from .entities import Player, SPRITE_FILES
 from .config import MAX_SPEED, GRAVITY, JUMP_SPEED
 
 WIN_W = 1280
 WIN_H = 720
 PLATFORM_HEIGHT = 30
 PLATFORM_MARGIN = 60
+FIXED_DT = 1 / 120
 
-# Фиксированный шаг физики
-FIXED_DT = 1 / 120  # 120 тиков физики в секунду
+# =============================================================================
+#           РУЧНАЯ НАСТРОЙКА ХИТБОКСОВ
+# =============================================================================
+MANUAL_HITBOX_ADJUSTMENTS = {
+    "idle": (25, 0, 5, 0),
+    "run": (15, 0, 15, 0),
+    "jump_start": (15, 0, 15, 0),
+    "jump_up": (20, 0, 10, 0),
+    "jump_fall": (20, 0, 10, 0),
+    "jump_land": (15, 0, 15, 0),
+}
 
 
-def run_pygame_level(level: int = 1, external_running_flag=None):
+def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running_flag=None):
     """
     Запускает уровень на pygame.
-    Если external_running_flag передан (PygameThread),
-    то цикл периодически проверяет external_running_flag._running
-    и мягко выходит, когда там станет False.
     """
-
-    # macOS: отключаем AppNap, на винде просто ничего не произойдёт
     if sys.platform == "darwin":
         os.system("defaults write -g NSAppSleepDisabled -bool YES")
 
-    # Немного тюнинга SDL
     os.environ["SDL_RENDER_VSYNC"] = "0"
     os.environ["SDL_HINT_RENDER_BATCHING"] = "1"
-    os.environ["PYGAME_BLEND_ALPHA_SDL2"] = "1"
 
     pygame.init()
     pygame.display.set_caption(f"Уровень {level} — Breathing Game")
-
-    # Без рамки, с двойной буферизацией и хардварным ускорением
-    screen = pygame.display.set_mode(
-        (WIN_W, WIN_H), pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE
-    )
+    screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE)
     clock = pygame.time.Clock()
-
-    # === ИГРОК ===
     player = Player(x=200, y=0)
 
-    # Загружаем PNG-спрайты напрямую для pygame
-    sprite_cache = {
-        "idle": pygame.image.load("resources/staying.png").convert_alpha(),
-        "run": pygame.image.load("resources/jump_start.png").convert_alpha(),
-        "jump_up": pygame.image.load("resources/jump_up.png").convert_alpha(),
-        "jump_fall": pygame.image.load("resources/jump_fall.png").convert_alpha(),
-    }
-
-    # ---------- СКЕЙЛ СПРАЙТОВ + РАЗМЕРЫ ПЕРСОНАЖА ----------
-    # Подстрой коэффициент, если нужно изменить размер ниндзя
+    # === ЗАГРУЗКА И НАСТРОЙКА РЕСУРСОВ ===
+    sprite_cache = {}
+    hitbox_cache = {}
     scale = 0.175
-    for name, surf in sprite_cache.items():
-        w = int(surf.get_width() * scale)
-        h = int(surf.get_height() * scale)
-        sprite_cache[name] = pygame.transform.smoothscale(surf, (w, h))
 
-    # Размеры игрока берём из idle-спрайта
-    idle_surf = sprite_cache["idle"]
-    player.w = idle_surf.get_width()
-    player.h = idle_surf.get_height()
+    for name, filename in SPRITE_FILES.items():
+        try:
+            full_path = os.path.join("resources", filename)
+            surf = pygame.image.load(full_path).convert_alpha()
+            w, h = int(surf.get_width() * scale), int(surf.get_height() * scale)
+            scaled_surf = pygame.transform.smoothscale(surf, (w, h))
+            sprite_cache[name] = scaled_surf
 
-    # Вычисляем реальный низ персонажа (без пустоты)
-    # get_bounding_rect возвращает прямоугольник, охватывающий непрозрачные пиксели
-    idle_rect = idle_surf.get_bounding_rect()
-    # Отступ от низа картинки до низа реальных пикселей
-    bottom_padding = player.h - idle_rect.bottom
+            bbox = scaled_surf.get_bounding_rect()
+            if name in MANUAL_HITBOX_ADJUSTMENTS:
+                trim_l, trim_t, trim_r, trim_b = MANUAL_HITBOX_ADJUSTMENTS[name]
+                bbox.x += trim_l
+                bbox.y += trim_t
+                bbox.width -= (trim_l + trim_r)
+                bbox.height -= (trim_t + trim_b)
 
-    # Хитбокс для коллизий (уже, чем спрайт)
-    # Тело занимает около 40% ширины спрайта по центру
-    hitbox_w = int(player.w * 0.4)
-    hitbox_offset_x = (player.w - hitbox_w) // 2
-    # --------------------------------------------------------
+            hitbox_cache[name] = bbox
 
-    # === ПЛАТФОРМА ===
+        except pygame.error as e:
+            print(f"Не удалось загрузить спрайт: {filename}. Ошибка: {e}")
+            continue
+
+    idle_surf = sprite_cache.get("idle", pygame.Surface((64, 128)))
+    player.w, player.h = idle_surf.get_size()
+
+    # === ИГРОВЫЕ ОБЪЕКТЫ ===
     platform_w = int(WIN_W * 0.7)
-    platform_x = (WIN_W - platform_w) // 2
-    platform_y = WIN_H - PLATFORM_HEIGHT - PLATFORM_MARGIN
-    platform_rect = pygame.Rect(platform_x, platform_y, platform_w, PLATFORM_HEIGHT)
+    platform_rect = pygame.Rect(
+        (WIN_W - platform_w) // 2,
+        WIN_H - PLATFORM_HEIGHT - PLATFORM_MARGIN,
+        platform_w,
+        PLATFORM_HEIGHT
+    )
 
-    # Ставим игрока ровно на платформу
-    player.y = platform_y - player.h + bottom_padding
+    initial_hitbox = hitbox_cache.get("idle", pygame.Rect(0, 0, player.w, player.h))
+    player.y = platform_rect.top - (initial_hitbox.y + initial_hitbox.height)
     player.prev_y = player.y
-
     player.prev_x = player.x
-    player.prev_y = player.y
-    player.facing = 1
 
-    # === Интерполяция ===
+    # === ПРОСТЫЕ ФИКСЫ ===
+    current_state = "idle"
+    frame_in_state = 0
+    GROUND_THRESHOLD = 2  # Пикселей для проверки grounded
+
     accumulator = 0.0
     prev_time = pygame.time.get_ticks() / 1000.0
-
     running = True
+    frame_count = 0
+
     while running:
-        # Если поток попросил остановиться — выходим
-        if external_running_flag is not None and not external_running_flag._running:
+        if external_running_flag and not external_running_flag.is_set():
             running = False
 
-        # ======================
-        #  ВЫЧИСЛЯЕМ DELTA TIME
-        # ======================
         now = pygame.time.get_ticks() / 1000.0
-        frame_time = now - prev_time
+        frame_time = min(now - prev_time, 0.25)
         prev_time = now
-
-        if frame_time > 0.25:  # защита от дикого фриза
-            frame_time = 0.25
-
         accumulator += frame_time
+        frame_count += 1
 
-        # === СОБЫТИЯ ===
         for ev in pygame.event.get():
-            if ev.type == pygame.QUIT:
+            if ev.type == pygame.QUIT or (ev.type == pygame.KEYDOWN and ev.key in (pygame.K_ESCAPE, pygame.K_q)):
                 running = False
-
-            if ev.type == pygame.KEYDOWN:
-                # ESC / Q тоже закрывают игру
-                if ev.key in (pygame.K_ESCAPE, pygame.K_q):
-                    running = False
 
         keys = pygame.key.get_pressed()
 
-        # =======================
-        #     ФИЗИКА (fixed dt)
-        # =======================
         while accumulator >= FIXED_DT:
-            # сохраняем прошлую позицию
-            player.prev_x = player.x
-            player.prev_y = player.y
+            player.prev_x, player.prev_y = player.x, player.y
 
-            # Горизонталь без ускорения
+            # --- Горизонтальное движение ---
             if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-                player.vx = -MAX_SPEED
-                player.facing = -1
+                player.vx, player.facing = -MAX_SPEED, -1
             elif keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-                player.vx = MAX_SPEED
-                player.facing = 1
+                player.vx, player.facing = MAX_SPEED, 1
             else:
                 player.vx = 0
 
-            # Прыжок
-            if (
-                keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]
-            ) and player.grounded:
+            # --- Прыжок ---
+            if (keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]) and player.grounded:
                 player.vy = -JUMP_SPEED
                 player.grounded = False
 
-            # Гравитация
+            # --- Гравитация ---
             player.vy += GRAVITY * FIXED_DT
 
-            # Интеграция
+            # --- Применение скоростей ---
             player.x += player.vx * FIXED_DT
             player.y += player.vy * FIXED_DT
 
-            # Границы по X
-            if player.x < 0:
-                player.x = 0
-            if player.x + player.w > WIN_W:
-                player.x = WIN_W - player.w
+            # --- Ограничение по краям ---
+            player.x = max(0, min(player.x, WIN_W - player.w))
 
-            # Коллизия с платформой
-            # Считаем координату "ног"
-            foot_y = player.y + player.h - bottom_padding
-
-            # Считаем хитбокс по X
-            current_hitbox_x = player.x + hitbox_offset_x
-
-            on_platform = (
-                player.vy >= 0
-                and foot_y >= platform_y
-                and foot_y <= platform_y + PLATFORM_HEIGHT
-                and (current_hitbox_x + hitbox_w) > platform_x
-                and current_hitbox_x < (platform_x + platform_w)
+            # --- Хитбокс текущего состояния ---
+            current_hitbox = hitbox_cache.get(current_state, initial_hitbox)
+            ph_box = pygame.Rect(
+                player.x + current_hitbox.x,
+                player.y + current_hitbox.y,
+                current_hitbox.width,
+                current_hitbox.height
+            )
+            prev_ph_box = pygame.Rect(
+                player.prev_x + current_hitbox.x,
+                player.prev_y + current_hitbox.y,
+                current_hitbox.width,
+                current_hitbox.height
             )
 
-            if on_platform:
-                player.y = platform_y - player.h + bottom_padding
-                player.vy = 0
-                player.grounded = True
-            else:
-                # пол внизу
-                if player.y + player.h - bottom_padding >= WIN_H:
-                    player.y = WIN_H - player.h + bottom_padding
+            # --- Коллизия с платформой ---
+            player_on_platform = False
+            if ph_box.colliderect(platform_rect) and player.vy >= 0:
+                # Пересечение с платформой
+                overlap = ph_box.bottom - platform_rect.top
+                if 0 < overlap <= 20:  # маленькая поправка для стабильности
+                    player.y -= overlap
                     player.vy = 0
                     player.grounded = True
+                    player_on_platform = True
+
+            # --- Коллизия с полом ---
+            if player.y + current_hitbox.y + current_hitbox.height >= WIN_H:
+                player.y = WIN_H - (current_hitbox.y + current_hitbox.height)
+                player.vy = 0
+                player.grounded = True
+                player_on_platform = True
+
+            # --- Логика состояний ---
+            new_state = "idle"
+            if not player.grounded:
+                if player.vy < 0:
+                    new_state = "jump_up"
                 else:
-                    player.grounded = False
+                    new_state = "jump_fall"
+            elif abs(player.vx) > 10:
+                new_state = "run"
+
+            # Если мы только что приземлились и были в прыжке - стабилизируем
+            if "jump" in current_state and player_on_platform:
+                if frame_in_state > 3:
+                    new_state = "run" if abs(player.vx) > 10 else "idle"
+
+            if new_state != current_state:
+                frame_in_state = 0
+                current_state = new_state
+            else:
+                frame_in_state += 1
 
             accumulator -= FIXED_DT
 
-        # ==========================
-        #    ИНТЕРПОЛЯЦИЯ ДЛЯ РЕНДЕРА
-        # ==========================
+        # --- РЕНДЕР (интерполяция) ---
         alpha = accumulator / FIXED_DT
-        interp_x = player.prev_x + (player.x - player.prev_x) * alpha
-        interp_y = player.prev_y + (player.y - player.prev_y) * alpha
+        interp_x = player.prev_x * (1.0 - alpha) + player.x * alpha
+        interp_y = player.prev_y * (1.0 - alpha) + player.y * alpha
 
-        # === Выбор спрайта ===
-        if not player.grounded:
-            frame = "jump_up" if player.vy < 0 else "jump_fall"
-        else:
-            frame = "run" if abs(player.vx) > 10 else "idle"
-
-        surf = sprite_cache.get(frame)
-
-        # ===============
-        #     РЕНДЕР
-        # ===============
         screen.fill((30, 30, 30))
-
-        # Платформа
         pygame.draw.rect(screen, (100, 100, 100), platform_rect)
 
-        # Игрок
+        surf = sprite_cache.get(current_state)
         if surf:
-            draw_surf = surf
-            if player.facing == -1:
-                draw_surf = pygame.transform.flip(surf, True, False)
+            draw_surf = pygame.transform.flip(surf, True, False) if player.facing == -1 else surf
             screen.blit(draw_surf, (interp_x, interp_y))
-        else:
-            pygame.draw.rect(
-                screen,
-                (0, 200, 200),
-                pygame.Rect(interp_x, interp_y, player.w, player.h),
-            )
+
+            if draw_hitbox:
+                current_hitbox = hitbox_cache.get(current_state, initial_hitbox)
+
+                # Физическое смещение для отрисовки (учёт flip)
+                if player.facing == -1:
+                    # При повороте по горизонтали хитбокс смещается относительно правого края спрайта
+                    hitbox_x_offset = sprite_cache[current_state].get_width() - (
+                                current_hitbox.x + current_hitbox.width)
+                else:
+                    hitbox_x_offset = current_hitbox.x
+
+                debug_rect = pygame.Rect(
+                    interp_x + hitbox_x_offset,
+                    interp_y + current_hitbox.y,  # вертикальное смещение не меняем
+                    current_hitbox.width,
+                    current_hitbox.height
+                )
+                pygame.draw.rect(screen, (255, 0, 0), debug_rect, 2)
+
+                font = pygame.font.Font(None, 24)
+                state_text = font.render(f"State: {current_state}", True, (255, 255, 255))
+                ground_text = font.render(f"Grounded: {player.grounded}", True, (255, 255, 255))
+                vel_text = font.render(f"Velocity: ({player.vx:.1f}, {player.vy:.1f})", True, (255, 255, 255))
+                pos_text = font.render(f"Position: ({player.x:.1f}, {player.y:.1f})", True, (255, 255, 255))
+                screen.blit(state_text, (10, 10))
+                screen.blit(ground_text, (10, 40))
+                screen.blit(vel_text, (10, 70))
+                screen.blit(pos_text, (10, 100))
+
+                pygame.draw.line(screen, (0, 255, 0),
+                                 (platform_rect.left, platform_rect.top),
+                                 (platform_rect.right, platform_rect.top), 2)
 
         pygame.display.flip()
-
-        # FPS рендера (физика — по FIXED_DT)
         clock.tick(144)
 
     pygame.quit()
