@@ -2,9 +2,9 @@ import cv2
 import mediapipe as mp
 
 
-class RibCageDetection:
+class TorsoDetection:
     """
-    Класс распознавания грудной клетки
+    Класс распознавания торса (грудной клетки и живота)
     """
 
     def __init__(self, frame_skip=0):
@@ -18,7 +18,7 @@ class RibCageDetection:
         self.frame_idx = 0
         # Точки, по которым рисуется область грудной клетки
         self.found_points = {}
-        self.found_ribcage = False
+        self.found_torso = False
 
     def process(self, cv_img):
         img = cv2.flip(cv_img, 1)  # Зеркалим изображение
@@ -61,36 +61,58 @@ class RibCageDetection:
 
                 # Центр между плечами (верх грудной клетки)
                 top_center = ((ls[0] + rs[0]) // 2, (ls[1] + rs[1]) // 2)
-                # Центр между бёдрами (низ туловища) — для определения высоты
+                # Центр между бёдрами (низ туловища)
                 bottom_center = ((lh[0] + rh[0]) // 2, (lh[1] + rh[1]) // 2)
 
                 # Примерная область для грудной клетки
-                # (от плеч до чуть выше бёдер)
-                top_y = top_center[1]
-                bottom_y = int(
+                # (от чуть выше плеч до диафрагмы)
+                top_y_chest = int(
+                    top_center[1] - 0.1 * (bottom_center[1] - top_center[1])
+                )
+                bottom_y_chest = int(
+                    top_center[1] + 0.4 * (bottom_center[1] - top_center[1])
+                )
+                left_x_chest = min(ls[0], rs[0])
+                right_x_chest = max(ls[0], rs[0])
+
+                # Примерная область для живота
+                # (от чуть ниже диафрагмы до чуть выше бедер)
+                top_y_abdomen = int(
+                    top_center[1] + 1.0 * (bottom_center[1] - top_center[1])
+                )
+                bottom_y_abdomen = int(
                     top_center[1] + 0.6 * (bottom_center[1] - top_center[1])
                 )
-                left_x = min(ls[0], rs[0])
-                right_x = max(ls[0], rs[0])
 
-                # Отрисовка прямоугольника
+                left_x_abdomen = min(ls[0], rs[0])
+                right_x_abdomen = max(ls[0], rs[0])
+
+                # Отрисовка прямоугольников
                 cv2.rectangle(img,
-                              (left_x, top_y),
-                              (right_x, bottom_y),
+                              (left_x_chest, top_y_chest),
+                              (right_x_chest, bottom_y_chest),
                               (0, 255, 0), 2)
+                cv2.rectangle(img,
+                              (left_x_abdomen, top_y_abdomen),
+                              (right_x_abdomen, bottom_y_abdomen),
+                              (0, 0, 255), 2)
 
-                self.found_ribcage = True
+                self.found_torso = True
 
                 for key, value in {
-                    "top_y": top_y,
-                    "bottom_y": bottom_y,
-                    "left_x": left_x,
-                    "right_x": right_x
+                    "top_y_chest": top_y_chest,
+                    "bottom_y_chest": bottom_y_chest,
+                    "left_x_chest": left_x_chest,
+                    "right_x_chest": right_x_chest,
+                    "top_y_abdomen": top_y_abdomen,
+                    "bottom_y_abdomen": bottom_y_abdomen,
+                    "left_x_abdomen": left_x_abdomen,
+                    "right_x_abdomen": right_x_abdomen,
                 }.items():
                     self.found_points[key] = value
 
             else:
-                self.found_ribcage = False
+                self.found_torso = False
 
         # Если кадр пропущен - рисуем прошлые распознанные позиции
         else:
@@ -98,18 +120,28 @@ class RibCageDetection:
                 # Отрисовка прямоугольника
                 cv2.rectangle(img,
                               (
-                                  self.found_points['left_x'],
-                                  self.found_points['top_y']
+                                  self.found_points['left_x_chest'],
+                                  self.found_points['top_y_chest']
                               ),
                               (
-                                  self.found_points['right_x'],
-                                  self.found_points['bottom_y']
+                                  self.found_points['right_x_chest'],
+                                  self.found_points['bottom_y_chest']
                               ),
                               (0, 255, 0), 2)
+                cv2.rectangle(img,
+                              (
+                                  self.found_points['left_x_abdomen'],
+                                  self.found_points['top_y_abdomen']
+                              ),
+                              (
+                                  self.found_points['right_x_abdomen'],
+                                  self.found_points['bottom_y_abdomen']
+                              ),
+                              (0, 0, 255), 2)
 
         self.frame_idx += 1
 
-        return img, self.found_ribcage
+        return img, self.found_torso
 
 
 class HandsDetection:

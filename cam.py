@@ -84,9 +84,9 @@ class VideoThread(QThread):
         logger.info("Loading Mediapipe...")
         # Импорт RibCageDetection (MediaPipe)
         try:
-            from detection import RibCageDetection
+            from detection import TorsoDetection
             self.import_success = True
-            self.processor = RibCageDetection(frame_skip=2)
+            self.processor = TorsoDetection(frame_skip=2)
             logger.info("Mediapipe loaded")
         except Exception as e:
             logger.exception(f"Failed to load!\n{e}")
