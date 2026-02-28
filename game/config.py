@@ -27,20 +27,16 @@ PLATFORM_HEIGHT = 25
 # Каждый уровень — это список кортежей (x, y, w, h) для платформ
 LEVELS = {
     1: [
-        # Уровень 1: Хардкорный подъем и прыжки над пропастью
-        (50, WIN_H - 100, 300, PLATFORM_HEIGHT),
-        (500, WIN_H - 250, 150, PLATFORM_HEIGHT),
-        (800, WIN_H - 150, 150, PLATFORM_HEIGHT),
-        (1100, WIN_H - 300, 100, PLATFORM_HEIGHT),
-        (1300, WIN_H - 450, 120, PLATFORM_HEIGHT),
-        (1600, WIN_H - 350, 150, PLATFORM_HEIGHT),
-        (2000, WIN_H - 200, 250, PLATFORM_HEIGHT),
-        (2400, WIN_H - 400, 80, PLATFORM_HEIGHT),
-        (2700, WIN_H - 250, 200, PLATFORM_HEIGHT),
-        (3100, WIN_H - 350, 150, PLATFORM_HEIGHT),
-        (3500, WIN_H - 150, 300, PLATFORM_HEIGHT),
-        (4000, WIN_H - 400, 100, PLATFORM_HEIGHT),
-        (4400, WIN_H - 200, 400, PLATFORM_HEIGHT), # Финишная платформа
+        # Уровень 1: Паркур с меньшим количеством пропастей
+        (50, WIN_H - 100, 500, PLATFORM_HEIGHT),
+        (650, WIN_H - 250, 300, PLATFORM_HEIGHT),
+        (1050, WIN_H - 150, 400, PLATFORM_HEIGHT),
+        (1550, WIN_H - 300, 350, PLATFORM_HEIGHT),
+        (2000, WIN_H - 200, 500, PLATFORM_HEIGHT),
+        (2600, WIN_H - 400, 400, PLATFORM_HEIGHT),
+        (3100, WIN_H - 250, 500, PLATFORM_HEIGHT),
+        (3700, WIN_H - 350, 400, PLATFORM_HEIGHT),
+        (4200, WIN_H - 200, 600, PLATFORM_HEIGHT), # Финишная платформа
     ],
     2: [
         # Уровень 2: Вертикальный паркур
@@ -72,5 +68,13 @@ LEVELS = {
         (1100, WIN_H - 500, 120, PLATFORM_HEIGHT),
         (1400, WIN_H - 300, 200, PLATFORM_HEIGHT),
         (1800, WIN_H - 200, 150, PLATFORM_HEIGHT),
+    ]
+}
+
+# Чекпойнты: словарь level -> list of (trigger_x, spawn_x, spawn_y)
+CHECKPOINTS = {
+    1: [
+        (1100, 1100, WIN_H - 150),
+        (2650, 2650, WIN_H - 400),
     ]
 }

@@ -1,8 +1,9 @@
 import os
 import sys
+import json
 import pygame
 from .entities import Player, SPRITE_FILES
-from .config import MAX_SPEED, GRAVITY, JUMP_SPEED, FLY_SPEED, LEVELS, WIN_W, WIN_H, WORLD_W, WORLD_H, SPAWN_POS
+from .config import MAX_SPEED, GRAVITY, JUMP_SPEED, FLY_SPEED, LEVELS, WIN_W, WIN_H, WORLD_W, WORLD_H, SPAWN_POS, CHECKPOINTS
 PLATFORM_HEIGHT = 30
 PLATFORM_MARGIN = 60
 FIXED_DT = 1 / 120
@@ -18,6 +19,25 @@ MANUAL_HITBOX_ADJUSTMENTS = {
     "jump_fall": (20, 0, 10, 0),
     "jump_land": (15, 0, 15, 0),
 }
+
+
+SAVE_FILE = "save_data.json"
+
+def load_save():
+    if os.path.exists(SAVE_FILE):
+        try:
+            with open(SAVE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def write_save(data):
+    try:
+        with open(SAVE_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
 
 
 class Camera:
@@ -127,8 +147,20 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
     level_config = LEVELS.get(level, LEVELS[1])
     platforms = [pygame.Rect(x, y, w, h) for (x, y, w, h) in level_config]
 
+    # === ЧЕКПОЙНТЫ И СОХРАНЕНИЯ ===
+    save_data = load_save()
+    level_save = save_data.get(str(level), {})
+
+    saved_spawn = level_save.get("spawn", SPAWN_POS)
+    current_spawn = (saved_spawn[0], saved_spawn[1])
+    elapsed_time_saved = level_save.get("time", 0)
+
+    level_checkpoints = CHECKPOINTS.get(level, []).copy()
+    # Убираем чекпойнты, которые уже пройдены (их x <= текущему спавну)
+    level_checkpoints = [cp for cp in level_checkpoints if cp[0] > current_spawn[0]]
+
     # === ИГРОК НА СТАРТ ===
-    player.x, player.y = SPAWN_POS
+    player.x, player.y = current_spawn
     player.y -= player.h # Чтобы не был в платформе если спавн на ней
 
     player.prev_x = player.x
@@ -139,6 +171,9 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
     camera = Camera(WORLD_W, WORLD_H)
     accumulator = 0.0
     prev_time = pygame.time.get_ticks() / 1000.0
+
+    level_start_time = pygame.time.get_ticks()
+    timer_font = pygame.font.Font(None, 48)
 
     running = True
     try:
@@ -238,10 +273,23 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                                 player.grounded = True
                                 on_platform = True
 
+                # --- ПРОВЕРКА ЧЕКПОЙНТОВ ---
+                if level_checkpoints and player.x >= level_checkpoints[0][0]:
+                    cp = level_checkpoints.pop(0)
+                    current_spawn = (cp[1], cp[2])
+
+                    # Сохраняем прогресс (время и текущий спавн)
+                    current_time_ms = pygame.time.get_ticks() - level_start_time + elapsed_time_saved
+                    save_data[str(level)] = {
+                        "spawn": current_spawn,
+                        "time": current_time_ms
+                    }
+                    write_save(save_data)
+
                 # --- ПРОВЕРКА СМЕРТИ (ПАДЕНИЕ) ---
                 if player.y > WIN_H:
-                    # Респаун
-                    player.x, player.y = SPAWN_POS
+                    # Респаун на последнем чекпойнте (без сброса общего времени спавна)
+                    player.x, player.y = current_spawn
                     player.y -= player.h
                     player.vx = 0
                     player.vy = 0
@@ -283,6 +331,11 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 # Добавим "толщину" платформе для красоты
                 pygame.draw.rect(screen, (50, 50, 70), camera.apply(pygame.Rect(plat.x, plat.y+5, plat.width, plat.height-5)))
 
+            # Рисуем чекпойнты (зеленые флажки)
+            for cp in level_checkpoints:
+                flag_rect = pygame.Rect(cp[0], cp[2] - 40, 5, 40)
+                pygame.draw.rect(screen, (0, 255, 0), camera.apply(flag_rect))
+
             # Игрок
             if surf:
                 draw_surf = surf
@@ -291,6 +344,19 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
 
                 # Применяем смещение камеры к позиции игрока
                 screen.blit(draw_surf, (interp_x - camera.camera.x, interp_y - camera.camera.y))
+
+            # --- ОТРИСОВКА ТАЙМЕРА ---
+            current_ticks = pygame.time.get_ticks() - level_start_time + elapsed_time_saved
+            mins = current_ticks // 60000
+            secs = (current_ticks % 60000) // 1000
+            ms = current_ticks % 1000
+            timer_text = f"{mins}:{secs:02d}:{ms:03d}"
+            timer_surf = timer_font.render(timer_text, True, (255, 255, 255))
+            timer_rect = timer_surf.get_rect(center=(WIN_W // 2, 30))
+            timer_shadow = timer_font.render(timer_text, True, (0, 0, 0))
+            screen.blit(timer_shadow, timer_rect.move(2, 2))
+            screen.blit(timer_surf, timer_rect)
+
             if draw_hitbox:
                 current_hitbox = hitbox_cache.get(current_state, initial_hitbox)
 
