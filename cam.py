@@ -1,6 +1,7 @@
 import platform
 import logging
 import cv2
+import numpy as np
 from PyQt5.QtCore import QThread, Qt, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
 
@@ -62,8 +63,6 @@ class VideoThread(QThread):
         self.cap_height = cap_height
         self.label = target_label
         self.desc_label = description_label
-        self.import_success = False
-        self.processor = None
 
         self.fps = fps
         self.prev = 0
@@ -81,16 +80,6 @@ class VideoThread(QThread):
         except Exception:
             pass
 
-        logger.info("Loading Mediapipe...")
-        # Импорт RibCageDetection (MediaPipe)
-        try:
-            from detection import TorsoDetection
-            self.import_success = True
-            self.processor = TorsoDetection(frame_skip=2)
-            logger.info("Mediapipe loaded")
-        except Exception as e:
-            logger.exception(f"Failed to load!\n{e}")
-
         if not cap.isOpened():
             cap.release()
             cap = cv2.VideoCapture(self.cam_index)
@@ -104,20 +93,24 @@ class VideoThread(QThread):
                 self.msleep(10)
                 continue
 
-            if self.import_success:
-                # BGR numpy array & кол-во ладоней
-                processed, result = self.processor.process(cv_img)
-            else:
-                # в случае ошибки просто отправляем сырой кадр
-                processed, result = cv_img, False
+            # Конвертация в HSV
+            hsv = cv2.cvtColor(cv_img, cv2.COLOR_BGR2HSV)
 
-            if result:
-                self.detection_desc_signal.emit("DETECTED")
-            else:
-                self.detection_desc_signal.emit("NONE")
+            h_min = 35
+            h_max = 95
+            s_min = 55
+            s_max = 255
+            v_min = 100
+            v_max = 255
+
+            lower = np.array([h_min, s_min, v_min])
+            upper = np.array([h_max, s_max, v_max])
+
+            mask = cv2.inRange(hsv, lower, upper)
+            result = cv2.bitwise_and(cv_img, cv_img, mask=mask)
 
             # Конвертация в QPixmap
-            pix = convert_cv_qt(processed).scaled(
+            pix = convert_cv_qt(result).scaled(
                 self.label.width(),
                 self.label.height(),
                 Qt.KeepAspectRatio,
