@@ -512,6 +512,11 @@ class MainWindow(QtWidgets.QMainWindow):
         refresh_btn.clicked.connect(self.detect_available_cameras)
         camera_layout.addWidget(refresh_btn)
 
+        # Кнопка калибровки камеры
+        calibration_btn = QtWidgets.QPushButton("Откалибровать камеру")
+        calibration_btn.clicked.connect(self.calibrate_camera)
+        camera_layout.addWidget(calibration_btn)
+
         sl.addWidget(camera_group, alignment=QtCore.Qt.AlignCenter)
         # --- КОНЕЦ НАСТРОЕК КАМЕРЫ ---
 
@@ -606,6 +611,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     break
 
         logger.info(f"Найдено {len(cameras)} камер")
+
+    def calibrate_camera(self):
+        """Калибровка камеры"""
+        logger.info(f"Запущена калибровка камеры с индексом {self.selected_camera_index}")
 
     def on_camera_changed(self, index):
         """Обработчик изменения выбранной камеры"""
