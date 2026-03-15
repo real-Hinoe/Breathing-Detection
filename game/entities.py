@@ -74,3 +74,16 @@ class Platform:
 
         # Для наклонных поверхностей (пока не реализовано)
         return (0, -1)
+
+
+@dataclass
+class Enemy:
+    type: str  # "wood_golem" or "crazy_mushroom"
+    x: float
+    y: float
+    w: int = 60
+    h: int = 60
+    vx: float = 0.0
+    patrol_range: float = 0.0
+    start_x: float = 0.0
+    direction: int = 1

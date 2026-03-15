@@ -78,3 +78,12 @@ CHECKPOINTS = {
         (2650, 2650, WIN_H - 400),
     ]
 }
+
+ENEMIES = {
+    1: [
+        ("crazy_mushroom", 1300, WIN_H - 150 - 64, 0),
+        ("crazy_mushroom", 2250, WIN_H - 200 - 64, 0),
+        ("wood_golem", 3300, WIN_H - 250 - 80, 200),
+        ("wood_golem", 3800, WIN_H - 350 - 80, 150),
+    ]
+}

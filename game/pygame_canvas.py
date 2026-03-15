@@ -2,8 +2,8 @@ import os
 import sys
 import json
 import pygame
-from .entities import Player, SPRITE_FILES
-from .config import MAX_SPEED, GRAVITY, JUMP_SPEED, FLY_SPEED, LEVELS, WIN_W, WIN_H, WORLD_W, WORLD_H, SPAWN_POS, CHECKPOINTS
+from .entities import Player, Enemy, SPRITE_FILES
+from .config import MAX_SPEED, GRAVITY, JUMP_SPEED, FLY_SPEED, LEVELS, WIN_W, WIN_H, WORLD_W, WORLD_H, SPAWN_POS, CHECKPOINTS, ENEMIES
 PLATFORM_HEIGHT = 30
 PLATFORM_MARGIN = 60
 FIXED_DT = 1 / 120
@@ -19,25 +19,6 @@ MANUAL_HITBOX_ADJUSTMENTS = {
     "jump_fall": (20, 0, 10, 0),
     "jump_land": (15, 0, 15, 0),
 }
-
-
-SAVE_FILE = "save_data.json"
-
-def load_save():
-    if os.path.exists(SAVE_FILE):
-        try:
-            with open(SAVE_FILE, "r") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-def write_save(data):
-    try:
-        with open(SAVE_FILE, "w") as f:
-            json.dump(data, f)
-    except Exception:
-        pass
 
 
 class Camera:
@@ -120,6 +101,30 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
         except Exception as e:
             print(f"Error loading {name}: {e}")
 
+    # Загружаем спрайт гриба отдельно
+    mushroom_sprite = None
+    mushroom_bbox = None
+    try:
+        path = os.path.join("resources", "crazy_mushroom.png")
+        if os.path.exists(path):
+            surf = pygame.image.load(path).convert_alpha()
+            mushroom_sprite = pygame.transform.smoothscale(surf, (64, 64))
+            mushroom_bbox = mushroom_sprite.get_bounding_rect()
+    except Exception as e:
+        print(f"Error loading mushroom: {e}")
+
+    # Загружаем спрайт голема
+    golem_sprite = None
+    golem_bbox = None
+    try:
+        path = os.path.join("resources", "wood_golem.png")
+        if os.path.exists(path):
+            surf = pygame.image.load(path).convert_alpha()
+            golem_sprite = pygame.transform.smoothscale(surf, (80, 80))
+            golem_bbox = golem_sprite.get_bounding_rect()
+    except Exception as e:
+        print(f"Error loading golem: {e}")
+
     # Размеры игрока берём из idle-спрайта
     if "idle" in sprite_cache:
         idle_surf = sprite_cache["idle"]
@@ -138,6 +143,10 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
     # Хитбокс для коллизий (уже, чем спрайт)
     hitbox_w = int(player.w * 0.4)
     hitbox_offset_x = (player.w - hitbox_w) // 2
+    
+    # Хитбокс по вертикали (от головы до ног с учетом паддинга)
+    hitbox_offset_y = 10
+    hitbox_h = player.h - bottom_padding - hitbox_offset_y
 
     # Начальный хитбокс (если анимация не найдена)
     initial_hitbox = pygame.Rect(0, 0, player.w, player.h)
@@ -147,17 +156,24 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
     level_config = LEVELS.get(level, LEVELS[1])
     platforms = [pygame.Rect(x, y, w, h) for (x, y, w, h) in level_config]
 
-    # === ЧЕКПОЙНТЫ И СОХРАНЕНИЯ ===
-    save_data = load_save()
-    level_save = save_data.get(str(level), {})
-
-    saved_spawn = level_save.get("spawn", SPAWN_POS)
-    current_spawn = (saved_spawn[0], saved_spawn[1])
-    elapsed_time_saved = level_save.get("time", 0)
+    # === ЧЕКПОЙНТЫ (ТОЛЬКО ДЛЯ ТЕКУЩЕЙ СЕССИИ) ===
+    current_spawn = SPAWN_POS
 
     level_checkpoints = CHECKPOINTS.get(level, []).copy()
-    # Убираем чекпойнты, которые уже пройдены (их x <= текущему спавну)
-    level_checkpoints = [cp for cp in level_checkpoints if cp[0] > current_spawn[0]]
+    # Все чекпойнты доступны изначально при заходе на уровень
+    level_checkpoints = [cp for cp in level_checkpoints]
+
+    # === ИНИЦИАЛИЗАЦИЯ ВРАГОВ ===
+    enemies = []
+    enemies_config = ENEMIES.get(level, [])
+    for etype, ex, ey, erad in enemies_config:
+        if etype == "crazy_mushroom":
+            enemies.append(Enemy(type=etype, x=ex, y=ey, w=64, h=64))
+        elif etype == "wood_golem":
+            enemies.append(Enemy(type=etype, x=ex, y=ey, w=80, h=80, patrol_range=erad, start_x=ex, direction=1))
+
+    # === МАЯК ФИНИША ===
+    finish_rect = pygame.Rect(WORLD_W - 100, WIN_H - 125, 60, 100)
 
     # === ИГРОК НА СТАРТ ===
     player.x, player.y = current_spawn
@@ -248,10 +264,45 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 # --- КОЛЛИЗИЯ С ПЛАТФОРМАМИ ---
                 # Считаем хитбокс по X и Y
                 current_hitbox_x = player.x + hitbox_offset_x
+                current_hitbox_y = player.y + hitbox_offset_y
+                player_rect_physics = pygame.Rect(current_hitbox_x, current_hitbox_y, hitbox_w, hitbox_h)
 
-                # Координата головы и ног
-                head_y = player.y + 10 # Допуск сверху
-                foot_y = player.y + player.h - bottom_padding
+                # --- КОЛЛИЗИЯ С ВРАГАМИ ---
+                death_triggered = False
+                full_player_rect = pygame.Rect(player.x, player.y, player.w, player.h)
+                
+                for en in enemies:
+                    if en.type == "crazy_mushroom" and mushroom_sprite:
+                        enemy_rect = mushroom_bbox.move(en.x, en.y)
+                        if full_player_rect.colliderect(enemy_rect):
+                            death_triggered = True
+                    elif en.type == "wood_golem" and golem_sprite:
+                        # Движение голема (только здесь, внутри цикла физики)
+                        if en.patrol_range > 0:
+                            en.vx = 100 * en.direction
+                            en.x += en.vx * FIXED_DT
+                            if abs(en.x - en.start_x) >= en.patrol_range:
+                                en.direction *= -1
+                        
+                        enemy_rect = golem_bbox.move(en.x, en.y)
+                        if full_player_rect.colliderect(enemy_rect):
+                            death_triggered = True
+
+                    if death_triggered:
+                        player.x, player.y = current_spawn
+                        player.y -= player.h
+                        player.vx = 0
+                        player.vy = 0
+                        player.grounded = False
+                        break
+                
+                if death_triggered:
+                    accumulator = 0
+                    continue
+
+                # Координата головы и ног (для платформенной логики)
+                head_y = player.y + hitbox_offset_y
+                foot_y = head_y + hitbox_h
 
                 on_platform = False
 
@@ -262,7 +313,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                         # 1. Проверка Головы (Столкновение снизу вверх)
                         if player.vy < 0:
                             if head_y >= plat.bottom - 10 and head_y <= plat.bottom + 5:
-                                player.y = plat.bottom - 10 # Отбрасываем чуть вниз
+                                player.y = plat.bottom - hitbox_offset_y # Отбрасываем вниз
                                 player.vy = 0 # Останавливаем взлет
 
                         # 2. Проверка Ног (Приземление)
@@ -277,14 +328,20 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 if level_checkpoints and player.x >= level_checkpoints[0][0]:
                     cp = level_checkpoints.pop(0)
                     current_spawn = (cp[1], cp[2])
-
-                    # Сохраняем прогресс (время и текущий спавн)
-                    current_time_ms = pygame.time.get_ticks() - level_start_time + elapsed_time_saved
-                    save_data[str(level)] = {
-                        "spawn": current_spawn,
-                        "time": current_time_ms
-                    }
-                    write_save(save_data)
+                
+                # --- ПРОВЕРКА ЗАВЕРШЕНИЯ УРОВНЯ (МАЯК) ---
+                player_rect = pygame.Rect(player.x, player.y, player.w, player.h)
+                if player_rect.colliderect(finish_rect):
+                    # Отбрасываем в начало и сбрасываем всё
+                    player.x, player.y = SPAWN_POS
+                    player.y -= player.h
+                    player.vx = 0
+                    player.vy = 0
+                    player.grounded = False
+                    
+                    current_spawn = SPAWN_POS
+                    level_start_time = pygame.time.get_ticks()
+                    level_checkpoints = CHECKPOINTS.get(level, []).copy()
 
                 # --- ПРОВЕРКА СМЕРТИ (ПАДЕНИЕ) ---
                 if player.y > WIN_H:
@@ -331,10 +388,27 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 # Добавим "толщину" платформе для красоты
                 pygame.draw.rect(screen, (50, 50, 70), camera.apply(pygame.Rect(plat.x, plat.y+5, plat.width, plat.height-5)))
 
+            # Рисуем врагов
+            for en in enemies:
+                if en.type == "crazy_mushroom" and mushroom_sprite:
+                    screen.blit(mushroom_sprite, (en.x - camera.camera.x, en.y - camera.camera.y))
+                elif en.type == "wood_golem" and golem_sprite:
+                    draw_surf = golem_sprite
+                    if en.direction == -1:
+                        draw_surf = pygame.transform.flip(golem_sprite, True, False)
+                    # Костыль для центрирования если нужно, но пока просто блит
+                    screen.blit(draw_surf, (en.x - camera.camera.x, en.y - camera.camera.y))
+
             # Рисуем чекпойнты (зеленые флажки)
             for cp in level_checkpoints:
                 flag_rect = pygame.Rect(cp[0], cp[2] - 40, 5, 40)
                 pygame.draw.rect(screen, (0, 255, 0), camera.apply(flag_rect))
+
+            # Рисуем маяк финиша (синий флаг)
+            # Основание
+            pygame.draw.rect(screen, (100, 100, 100), camera.apply(pygame.Rect(finish_rect.x + 25, finish_rect.y, 10, 100)))
+            # Флаг
+            pygame.draw.rect(screen, (0, 100, 255), camera.apply(pygame.Rect(finish_rect.x + 35, finish_rect.y, 40, 30)))
 
             # Игрок
             if surf:
@@ -346,11 +420,12 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 screen.blit(draw_surf, (interp_x - camera.camera.x, interp_y - camera.camera.y))
 
             # --- ОТРИСОВКА ТАЙМЕРА ---
-            current_ticks = pygame.time.get_ticks() - level_start_time + elapsed_time_saved
+            current_ticks = pygame.time.get_ticks() - level_start_time
             mins = current_ticks // 60000
             secs = (current_ticks % 60000) // 1000
             ms = current_ticks % 1000
-            timer_text = f"{mins}:{secs:02d}:{ms:03d}"
+            ms_rounded = ms // 10
+            timer_text = f"{mins}:{secs:02d}:{ms_rounded:02d}"
             timer_surf = timer_font.render(timer_text, True, (255, 255, 255))
             timer_rect = timer_surf.get_rect(center=(WIN_W // 2, 30))
             timer_shadow = timer_font.render(timer_text, True, (0, 0, 0))
