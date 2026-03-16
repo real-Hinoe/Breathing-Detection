@@ -89,6 +89,8 @@ class VideoThread(QThread):
             # Ставим заданный FPS
             cv2.waitKey(1000 // self.fps)
             if not ret:
+                # Камера не работает
+                self.detection_desc_signal.emit("Ожидание запуска камеры...")
                 # небольшая пауза чтобы не крутить цикл вхолостую
                 self.msleep(10)
                 continue
@@ -116,6 +118,7 @@ class VideoThread(QThread):
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
             )
+            self.detection_desc_signal.emit("")
             self.change_pixmap_signal.emit(pix)
 
             # Небольшой отдых, чтобы не 100% загружать CPU
