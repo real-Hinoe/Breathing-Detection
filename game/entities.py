@@ -10,7 +10,7 @@ RES = (Path(__file__).resolve().parents[1] / "resources").resolve()
 
 # Список спрайтов персонажа
 SPRITE_FILES = {
-    "idle": "running.png",  # Есть вариант staying2.png, там он стоит на месте и смотрит вправо
+    "idle": "staying2.1.png",
     "run": "running.png",
     "jump_start": "jump_start.png",
     "jump_up": "jump_up.png",

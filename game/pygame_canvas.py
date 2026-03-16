@@ -70,6 +70,40 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
 
     bg_surf = create_background_surface()
 
+    # === PARALLAX BACKGROUND ===
+    bg_layers = []
+
+    for i in range(1, 4):
+        try:
+            path = os.path.join("resources", f"background{i}.png")
+            if os.path.exists(path):
+
+                surf = pygame.image.load(path).convert_alpha()
+
+                # масштабируем по высоте окна
+                scale = WIN_H / surf.get_height()
+
+                new_w = int(surf.get_width() * scale)
+                new_h = WIN_H
+
+                surf = pygame.transform.smoothscale(surf, (new_w, new_h))
+
+                bg_layers.append(surf)
+
+            else:
+                bg_layers.append(None)
+
+        except Exception as e:
+            print(f"Error loading background{i}: {e}")
+            bg_layers.append(None)
+
+    # Чем меньше коэффициент — тем дальше слой
+    parallax_factors = [
+        0.35,  # background1 (ближе)
+        0.2,  # background2
+        0.1  # background3 (самый дальний)
+    ]
+
     # === ИНИЦИАЛИЗАЦИЯ ИГРОКА ===
     # Ставим игрока в безопасное место (сверху слева, чтобы упал на платформу)
     # или можно настроить спавн для каждого уровня
@@ -125,6 +159,36 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
     except Exception as e:
         print(f"Error loading golem: {e}")
 
+    # === СПРАЙТЫ ПЛАТФОРМ ===
+    platform_sprites = []
+
+    for i in range(1, 5):
+        try:
+            path = os.path.join("resources", f"platform{i}.png")
+            if os.path.exists(path):
+                surf = pygame.image.load(path).convert_alpha()
+                platform_sprites.append(surf)
+        except Exception as e:
+            print(f"Error loading platform{i}: {e}")
+
+    # === СПРАЙТЫ ЧЕКПОИНТОВ ===
+    checkpoint_inactive = None
+    checkpoint_active = None
+
+    try:
+        path = os.path.join("resources", "check_point_inactive.png")
+        if os.path.exists(path):
+            checkpoint_inactive = pygame.image.load(path).convert_alpha()
+    except Exception as e:
+        print("Error loading checkpoint inactive:", e)
+
+    try:
+        path = os.path.join("resources", "check_point_active.png")
+        if os.path.exists(path):
+            checkpoint_active = pygame.image.load(path).convert_alpha()
+    except Exception as e:
+        print("Error loading checkpoint active:", e)
+
     # Размеры игрока берём из idle-спрайта
     if "idle" in sprite_cache:
         idle_surf = sprite_cache["idle"]
@@ -158,6 +222,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
 
     # === ЧЕКПОЙНТЫ (ТОЛЬКО ДЛЯ ТЕКУЩЕЙ СЕССИИ) ===
     current_spawn = SPAWN_POS
+    active_checkpoint = None
 
     level_checkpoints = CHECKPOINTS.get(level, []).copy()
     # Все чекпойнты доступны изначально при заходе на уровень
@@ -328,6 +393,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 if level_checkpoints and player.x >= level_checkpoints[0][0]:
                     cp = level_checkpoints.pop(0)
                     current_spawn = (cp[1], cp[2])
+                    active_checkpoint = cp
                 
                 # --- ПРОВЕРКА ЗАВЕРШЕНИЯ УРОВНЯ (МАЯК) ---
                 player_rect = pygame.Rect(player.x, player.y, player.w, player.h)
@@ -382,11 +448,55 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
             # ===============
             screen.blit(bg_surf, (0, 0))
 
+            # === PARALLAX RENDER ===
+            # for i in reversed(range(len(bg_layers))):
+            #     layer = bg_layers[i]
+            for i, layer in enumerate(bg_layers):
+
+                if layer:
+
+                    factor = parallax_factors[i]
+
+                    # смещение слоя
+                    offset_x = -camera.camera.x * factor
+
+                    layer_w = layer.get_width()
+
+                    # рисуем несколько копий чтобы фон не заканчивался
+                    start_x = int(offset_x) % layer_w - layer_w
+
+                    x = start_x
+                    while x < WIN_W:
+                        screen.blit(layer, (x, 0))
+                        x += layer_w
+
             # Рисуем все платформы с учетом камеры
-            for plat in platforms:
-                pygame.draw.rect(screen, (70, 70, 90), camera.apply(plat))
-                # Добавим "толщину" платформе для красоты
-                pygame.draw.rect(screen, (50, 50, 70), camera.apply(pygame.Rect(plat.x, plat.y+5, plat.width, plat.height-5)))
+            for i, plat in enumerate(platforms):
+
+                if platform_sprites:
+                    sprite_index = i % len(platform_sprites)
+                    sprite = platform_sprites[sprite_index]
+
+                    scale = plat.width / sprite.get_width()
+                    new_w = plat.width
+                    new_h = int(sprite.get_height() * scale)
+
+                    scaled = pygame.transform.smoothscale(sprite, (new_w, new_h))
+
+                    draw_x = plat.x - camera.camera.x
+
+                    # platform2.png поднимаем выше
+                    if sprite_index == 1:
+                        offset = 0.55
+                    else:
+                        offset = 0.4
+
+                    draw_y = plat.y - camera.camera.y - int(new_h * offset)
+
+                    screen.blit(scaled, (draw_x, draw_y))
+
+                else:
+                    pygame.draw.rect(screen, (70, 70, 90), camera.apply(plat))
 
             # Рисуем врагов
             for en in enemies:
@@ -400,9 +510,28 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                     screen.blit(draw_surf, (en.x - camera.camera.x, en.y - camera.camera.y))
 
             # Рисуем чекпойнты (зеленые флажки)
-            for cp in level_checkpoints:
-                flag_rect = pygame.Rect(cp[0], cp[2] - 40, 5, 40)
-                pygame.draw.rect(screen, (0, 255, 0), camera.apply(flag_rect))
+            for cp in CHECKPOINTS.get(level, []):
+
+                x = cp[0]
+                y = cp[2]
+
+                is_active = (active_checkpoint == cp)
+
+                sprite = checkpoint_active if is_active else checkpoint_inactive
+
+                if sprite:
+                    target_height = 60
+                    scale = target_height / sprite.get_height()
+
+                    new_w = int(sprite.get_width() * scale)
+                    new_h = target_height
+
+                    scaled = pygame.transform.smoothscale(sprite, (new_w, new_h))
+
+                    draw_x = x - camera.camera.x
+                    draw_y = y - new_h - camera.camera.y
+
+                    screen.blit(scaled, (draw_x, draw_y))
 
             # Рисуем маяк финиша (синий флаг)
             # Основание

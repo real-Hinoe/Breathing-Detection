@@ -287,10 +287,7 @@ class CameraWindow(QtWidgets.QMainWindow):
         bottom.setMinimumHeight(max(24, int(h * 0.1)))
         bl = QtWidgets.QHBoxLayout(bottom)
         bl.setContentsMargins(8, 4, 8, 4)
-        # Текст здесь временный - позже сюда будут попадать подсказки от анализа видео
-        self.info_label = QtWidgets.QLabel(
-            "Тут будут команды типа выпрямите спину, смотрите в камеру и т.п."
-        )
+        self.info_label = QtWidgets.QLabel()
         bl.addWidget(self.info_label)
         vbox.addWidget(bottom, stretch=1)
 
