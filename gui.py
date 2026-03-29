@@ -251,12 +251,14 @@ class CameraWindow(QtWidgets.QMainWindow):
 
     closed = QtCore.pyqtSignal()
 
-    def __init__(self, base_size: QtCore.QSize, btn_w, btn_h, font_px, parent=None):
+    def __init__(self, base_size: QtCore.QSize, btn_w, btn_h, font_px, parent=None,
+                 selected_camera=0):
         super().__init__(parent)
         self.camera = None
         self.btn_back = None
         self.info_label = None
         self.video_holder = None
+        self.cam_index = selected_camera
         self.setWindowTitle("Окно калибровки (временно просто камера)")
         # Убираем флаг "поверх других окон" и добавляем кнопки сворачивания/разворачивания
         flags = self.windowFlags()
@@ -314,7 +316,8 @@ class CameraWindow(QtWidgets.QMainWindow):
         if self.camera is None:
             target = self.video_holder.inner_widget()
             self.camera = cam.CameraController(
-                target_label=target, description_label=self.info_label
+                target_label=target, description_label=self.info_label,
+                cam_index=self.cam_index
             )
         self.camera.start()
         if self.info_label:
@@ -703,7 +706,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         base_size = QtCore.QSize(self.base_width, self.base_height)
         self._camera_window = CameraWindow(
-            base_size, self.child_back_w, self.child_back_h, self.child_back_font
+            base_size, self.child_back_w, self.child_back_h, self.child_back_font,
+            selected_camera=self.selected_camera_index
         )
         # кнопка в окне камеры возвращает сюда
         self._camera_window.btn_back.clicked.connect(self._camera_back_clicked)

@@ -6,9 +6,9 @@ from PyQt5.QtCore import QThread, Qt, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
 
 logger = logging.getLogger(__name__)
-LOWER_GREEN = np.array([40, 50, 50])
-UPPER_GREEN = np.array([80, 255, 255])
-MIN_CONTOUR_AREA = 1000
+LOWER_GREEN = np.array([35, 50, 50])
+UPPER_GREEN = np.array([85, 255, 255])
+MIN_CONTOUR_AREA = 100
 
 
 def find_available_cameras():
@@ -60,13 +60,13 @@ class VideoThread(QThread):
     change_pixmap_signal = pyqtSignal(QPixmap)
     detection_desc_signal = pyqtSignal(str)
 
-    def __init__(self, cam_index=0, cap_width=640, cap_height=360, fps=30,
+    def __init__(self, cam_index=0, cap_width=1280, cap_height=720, fps=30,
                  target_label=None, description_label=None):
         super().__init__()
         self.run_flag = True
         self.cam_index = cam_index
-        self.cap_width = cap_width
-        self.cap_height = cap_height
+        self.base_cap_width = cap_width
+        self.base_cap_height = cap_height
         self.label = target_label
         self.desc_label = description_label
 
@@ -77,18 +77,25 @@ class VideoThread(QThread):
         """Основной цикл потока: открывает камеру, читает кадры, эмитит сигнал."""
         is_mac = platform.system() == "Darwin"
         backend = cv2.CAP_AVFOUNDATION if is_mac else cv2.CAP_DSHOW
-        cap = cv2.VideoCapture(self.cam_index, backend)
+        cap1 = cv2.VideoCapture(self.cam_index, backend)
+        cap2 = cv2.VideoCapture(self.cam_index + 1, backend)
 
-        # Попробуем установить пониженное разрешение (ускоряет обработку)
-        try:
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.cap_width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cap_height)
-        except Exception:
-            pass
+        # Получаем реальное разрешение камер
+        cap1_w = cap1.get(cv2.CAP_PROP_FRAME_WIDTH)
+        cap1_h = cap1.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        cap2_w = cap2.get(cv2.CAP_PROP_FRAME_WIDTH)
+        cap2_h = cap2.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
-        if not cap.isOpened():
-            cap.release()
-            cap = cv2.VideoCapture(self.cam_index)
+        # Масштабируем площадь минимальной площади
+        min_area_scaled = ((max(cap1_w, cap2_w) // 2) * (max(cap1_h, cap2_h) // 2)
+                           // MIN_CONTOUR_AREA)
+
+        if not cap1.isOpened():
+            cap1.release()
+            cap1 = cv2.VideoCapture(self.cam_index, backend)
+        if not cap2.isOpened():
+            cap2.release()
+            cap2 = cv2.VideoCapture(self.cam_index + 1, backend)
 
         def sort_contours_bottom_to_left(contours, y_threshold=30):
             """
@@ -133,7 +140,7 @@ class VideoThread(QThread):
         def process_frame(frame, camera_id,
                           lower_green=LOWER_GREEN,
                           upper_green=UPPER_GREEN,
-                          min_area=MIN_CONTOUR_AREA):
+                          min_area=min_area_scaled):
             """
             Обработка кадра: выделение зеленых контуров и нумерация.
             """
@@ -166,8 +173,8 @@ class VideoThread(QThread):
             for i, contour in enumerate(sorted_contours, start=1):
                 x, y, w, h = cv2.boundingRect(contour)
 
-                # Рисуем контур
-                cv2.drawContours(process_output, [contour], -1, (0, 255, 0), 2)
+                # # Рисуем контур
+                # cv2.drawContours(process_output, [contour], -1, (0, 255, 0), 2)
 
                 # Рисуем прямоугольник
                 cv2.rectangle(process_output, (x, y), (x + w, y + h), (0, 255, 0), 2)
@@ -180,10 +187,17 @@ class VideoThread(QThread):
             return process_output, process_mask, len(sorted_contours)
 
         while self.run_flag:
-            ret, cv_img = cap.read()
+            ret1, cv_img1 = cap1.read()
+            ret2, cv_img2 = cap2.read()
             # Ставим заданный FPS
             cv2.waitKey(1000 // self.fps)
-            if not ret:
+            if not ret1:
+                # Камера не работает
+                self.detection_desc_signal.emit("Ожидание запуска камеры...")
+                # небольшая пауза чтобы не крутить цикл вхолостую
+                self.msleep(10)
+                continue
+            if not ret2:
                 # Камера не работает
                 self.detection_desc_signal.emit("Ожидание запуска камеры...")
                 # небольшая пауза чтобы не крутить цикл вхолостую
@@ -191,10 +205,15 @@ class VideoThread(QThread):
                 continue
 
             # Обработка кадров
-            output, mask, count = process_frame(cv_img, 0)
+            output1, mask1, count1 = process_frame(cv_img1, 0)
+            output2, mask2, count2 = process_frame(cv_img2, 0)
+
+            # Объединенное окно
+            combined = np.hstack([cv2.resize(output1, (self.base_cap_width, self.base_cap_height)),
+                                  cv2.resize(output2, (self.base_cap_width, self.base_cap_height))])
 
             # Конвертация в QPixmap
-            pix = convert_cv_qt(output).scaled(
+            pix = convert_cv_qt(combined).scaled(
                 self.label.width(),
                 self.label.height(),
                 Qt.KeepAspectRatio,
@@ -206,7 +225,8 @@ class VideoThread(QThread):
             # Небольшой отдых, чтобы не 100% загружать CPU
             self.msleep(5)
 
-        cap.release()
+        cap1.release()
+        cap2.release()
 
     def stop(self):
         """Останавливает поток и дожидается завершения."""
