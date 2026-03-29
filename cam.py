@@ -6,21 +6,26 @@ from PyQt5.QtCore import QThread, Qt, pyqtSignal
 from PyQt5.QtGui import QImage, QPixmap
 
 logger = logging.getLogger(__name__)
+LOWER_GREEN = np.array([40, 50, 50])
+UPPER_GREEN = np.array([80, 255, 255])
+MIN_CONTOUR_AREA = 1000
 
 
 def find_available_cameras():
     """Находит и возвращает список доступных камер"""
     cameras = []
 
-    # Пробуем открыть камеры с индексами от 0 до 10
-    for i in range(10):
+    # Пробуем открыть камеры с индексами от 0 до 2
+    for i in range(2):
         cap = None
         try:
             is_mac = platform.system() == "Darwin"
             backend = cv2.CAP_AVFOUNDATION if is_mac else cv2.CAP_DSHOW
             cap = cv2.VideoCapture(i, backend)
 
-            if cap.isOpened():
+            if not cap.isOpened():
+                break
+            else:
                 # Пробуем прочитать кадр для проверки
                 ret, frame = cap.read()
                 if ret:
@@ -39,6 +44,7 @@ def find_available_cameras():
                     logger.info(f"Найдена камера {i}: {width}x{height}@{fps}fps")
         except Exception as e:
             logger.warning(f"Ошибка при проверке камеры {i}: {e}")
+            break
         finally:
             if cap is not None:
                 cap.release()
@@ -84,6 +90,95 @@ class VideoThread(QThread):
             cap.release()
             cap = cv2.VideoCapture(self.cam_index)
 
+        def sort_contours_bottom_to_left(contours, y_threshold=30):
+            """
+            Сортировка контуров: снизу вверх, затем слева направо.
+            """
+            if not contours:
+                return []
+
+            bounding_boxes = [cv2.boundingRect(c) for c in contours]
+            indexed_boxes = list(enumerate(bounding_boxes))
+
+            # Сортируем по Y (снизу вверх - обратный порядок)
+            indexed_boxes.sort(key=lambda k: k[1][1], reverse=True)
+
+            sorted_contours = []
+            used_indices = set()
+
+            for i, box in indexed_boxes:
+                if i in used_indices:
+                    continue
+
+                # Находим все объекты в той же "строке"
+                row_boxes = [(i, box)]
+                used_indices.add(i)
+
+                for j, other_box in indexed_boxes:
+                    if j in used_indices:
+                        continue
+                    if abs(other_box[1] - box[1]) <= y_threshold:
+                        row_boxes.append((j, other_box))
+                        used_indices.add(j)
+
+                # Сортируем строку слева направо
+                row_boxes.sort(key=lambda k: k[1][0])
+
+                # Добавляем контуры в итоговый список
+                for idx, _ in row_boxes:
+                    sorted_contours.append(contours[idx])
+
+            return sorted_contours
+
+        def process_frame(frame, camera_id,
+                          lower_green=LOWER_GREEN,
+                          upper_green=UPPER_GREEN,
+                          min_area=MIN_CONTOUR_AREA):
+            """
+            Обработка кадра: выделение зеленых контуров и нумерация.
+            """
+            if frame is None or frame.size == 0:
+                return None, None, 0
+
+            # Преобразование в HSV
+            hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+            # Маска для зеленого цвета
+            process_mask = cv2.inRange(hsv, lower_green, upper_green)
+
+            # Морфологические операции для очистки
+            kernel = np.ones((5, 5), np.uint8)
+            process_mask = cv2.morphologyEx(process_mask, cv2.MORPH_OPEN, kernel)
+            process_mask = cv2.morphologyEx(process_mask, cv2.MORPH_CLOSE, kernel)
+
+            # Поиск контуров
+            contours, _ = cv2.findContours(process_mask, cv2.RETR_EXTERNAL,
+                                           cv2.CHAIN_APPROX_SIMPLE)
+
+            # Фильтрация по площади
+            contours = [c for c in contours if cv2.contourArea(c) > min_area]
+
+            # Сортировка контуров
+            sorted_contours = sort_contours_bottom_to_left(contours)
+
+            # Отрисовка
+            process_output = frame.copy()
+            for i, contour in enumerate(sorted_contours, start=1):
+                x, y, w, h = cv2.boundingRect(contour)
+
+                # Рисуем контур
+                cv2.drawContours(process_output, [contour], -1, (0, 255, 0), 2)
+
+                # Рисуем прямоугольник
+                cv2.rectangle(process_output, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+                # Добавляем номер с указанием камеры
+                label = f"Cam{camera_id}:#{i}"
+                cv2.putText(process_output, label, (x, y - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+            return process_output, process_mask, len(sorted_contours)
+
         while self.run_flag:
             ret, cv_img = cap.read()
             # Ставим заданный FPS
@@ -95,24 +190,11 @@ class VideoThread(QThread):
                 self.msleep(10)
                 continue
 
-            # Конвертация в HSV
-            hsv = cv2.cvtColor(cv_img, cv2.COLOR_BGR2HSV)
-
-            h_min = 35
-            h_max = 95
-            s_min = 55
-            s_max = 255
-            v_min = 100
-            v_max = 255
-
-            lower = np.array([h_min, s_min, v_min])
-            upper = np.array([h_max, s_max, v_max])
-
-            mask = cv2.inRange(hsv, lower, upper)
-            result = cv2.bitwise_and(cv_img, cv_img, mask=mask)
+            # Обработка кадров
+            output, mask, count = process_frame(cv_img, 0)
 
             # Конвертация в QPixmap
-            pix = convert_cv_qt(result).scaled(
+            pix = convert_cv_qt(output).scaled(
                 self.label.width(),
                 self.label.height(),
                 Qt.KeepAspectRatio,
