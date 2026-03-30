@@ -55,6 +55,24 @@ def create_background_surface():
     return bg
 
 
+def extract_ground_tile(surface, top_cut=0.25, bottom_cut=0.25):
+    """
+    Берёт центральную часть текстуры земли.
+    top_cut / bottom_cut — сколько отрезать сверху и снизу.
+    """
+    h = surface.get_height()
+
+    y1 = int(h * top_cut)
+    y2 = int(h * (1 - bottom_cut))
+
+    rect = pygame.Rect(0, y1, surface.get_width(), y2 - y1)
+
+    tile = pygame.Surface(rect.size, pygame.SRCALPHA)
+    tile.blit(surface, (0, 0), rect)
+
+    return tile
+
+
 def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running_flag=None):
     """
     Запускает уровень на pygame.
@@ -146,6 +164,9 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
         if os.path.exists(path):
             surf = pygame.image.load(path).convert_alpha()
             mushroom_sprite = pygame.transform.smoothscale(surf, (64, 64))
+
+            mushroom_bbox = mushroom_sprite.get_bounding_rect()
+
     except Exception as e:
         print(f"Error loading mushroom: {e}")
     # Загружаем спрайт шипа
@@ -181,6 +202,25 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 platform_sprites.append(surf)
         except Exception as e:
             print(f"Error loading platform{i}: {e}")
+
+    # === СПРАЙТЫ ЗЕМЛИ ===
+    ground_tiles = {}
+
+    for i in (2, 4):
+        try:
+            path = os.path.join("resources", f"ground{i}.png")
+            if os.path.exists(path):
+                surf = pygame.image.load(path).convert_alpha()
+
+                # берём только середину
+                ground_tiles[i] = extract_ground_tile(
+                    surf,
+                    top_cut=0.35,
+                    bottom_cut=0.15
+                )
+
+        except Exception as e:
+            print(f"Error loading ground{i}: {e}")
 
     # === СПРАЙТЫ ЧЕКПОИНТОВ ===
     checkpoint_inactive = None
@@ -591,12 +631,42 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
 
                     # platform2.png поднимаем выше
                     if sprite_index == 1:
-                        offset = 0.55
+                        offset = 0.3
+                    if sprite_index == 3:
+                        offset = 0.25
                     else:
                         offset = 0.4
 
                     draw_y = p_rect.y - camera.camera.y - int(new_h * offset)
                     screen.blit(scaled, (draw_x, draw_y))
+
+                    # ====================================================
+                    #          ДОСТРАИВАЕМ ЗЕМЛЮ ДО НИЗА ЭКРАНА
+                    # ====================================================
+                    ground_index = sprite_index + 1
+
+                    if ground_index in ground_tiles:
+
+                        tile = ground_tiles[ground_index]
+
+                        scale = plat.rect.width / tile.get_width()
+                        tile_w = plat.rect.width
+                        tile_h = int(tile.get_height() * scale)
+
+                        tile_scaled = pygame.transform.smoothscale(
+                            tile,
+                            (tile_w, tile_h)
+                        )
+
+                        # 🔥 ВАЖНО:
+                        # начинаем ЧУТЬ ВЫШЕ чтобы земля
+                        # залезла под остров
+                        ground_y = draw_y + new_h - int(tile_h * 0.6)
+
+                        while ground_y < WIN_H:
+                            screen.blit(tile_scaled, (draw_x, ground_y))
+                            ground_y += tile_h
+
                 else:
                     color = (70, 70, 90)
                     if plat.type == "moving": color = (100, 100, 150)
@@ -639,7 +709,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 sprite = checkpoint_active if is_active else checkpoint_inactive
 
                 if sprite:
-                    target_height = 60
+                    target_height = 100
                     scale = target_height / sprite.get_height()
 
                     new_w = int(sprite.get_width() * scale)

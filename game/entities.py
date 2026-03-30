@@ -10,7 +10,7 @@ RES = (Path(__file__).resolve().parents[1] / "resources").resolve()
 
 # Список спрайтов персонажа
 SPRITE_FILES = {
-    "idle": "staying2.1.png",
+    "idle": "staying2.2.png",
     "run": "running.png",
     "jump_start": "jump_start.png",
     "jump_up": "jump_up.png",
