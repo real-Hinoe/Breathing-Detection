@@ -64,8 +64,35 @@ class Player:
 class Platform:
     """Класс для платформ с дополнительной информацией для физики"""
     rect: pygame.Rect
+    type: str = "normal"
+    vx: float = 0.0
+    vy: float = 0.0
+    range_x: float = 0.0
+    range_y: float = 0.0
+    start_x: float = 0.0
+    start_y: float = 0.0
+    timer: float = 0.0
+    is_active: bool = True
     is_slope: bool = False  # Наклонная платформа
     slope_angle: float = 0.0  # Угол наклона в градусах
+
+    def update(self, dt: float):
+        if self.type == "moving":
+            # Движение по X
+            if self.range_x > 0:
+                self.rect.x += self.vx * dt
+                if abs(self.rect.x - self.start_x) >= self.range_x:
+                    self.vx *= -1
+            # Движение по Y
+            if self.range_y > 0:
+                self.rect.y += self.vy * dt
+                if abs(self.rect.y - self.start_y) >= self.range_y:
+                    self.vy *= -1
+
+        if self.type == "fragile" and self.timer > 0:
+            self.timer -= dt
+            if self.timer <= 0:
+                self.is_active = False
 
     def get_collision_normal(self, player_rect: pygame.Rect) -> Tuple[float, float]:
         """Возвращает нормаль поверхности в точке столкновения"""
@@ -87,3 +114,12 @@ class Enemy:
     patrol_range: float = 0.0
     start_x: float = 0.0
     direction: int = 1
+
+
+@dataclass
+class Hazard:
+    type: str  # "spike"
+    x: float
+    y: float
+    w: int = 40
+    h: int = 40

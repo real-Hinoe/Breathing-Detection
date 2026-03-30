@@ -39,35 +39,31 @@ LEVELS = {
         (4200, WIN_H - 200, 600, PLATFORM_HEIGHT), # Финишная платформа
     ],
     2: [
-        # Уровень 2: Вертикальный паркур
-        (100, WIN_H - 100, 200, PLATFORM_HEIGHT),
-        (400, WIN_H - 220, 150, PLATFORM_HEIGHT),
-        (150, WIN_H - 340, 150, PLATFORM_HEIGHT),
-        (450, WIN_H - 460, 150, PLATFORM_HEIGHT),
-        (200, WIN_H - 580, 150, PLATFORM_HEIGHT),
-        (600, WIN_H - 500, 200, PLATFORM_HEIGHT),
-        (900, WIN_H - 400, 150, PLATFORM_HEIGHT),
-        (1200, WIN_H - 300, 200, PLATFORM_HEIGHT),
+        # Уровень 2: Хрупкий подъем
+        (50, WIN_H - 100, 400, PLATFORM_HEIGHT), # Старт
+        (600, WIN_H - 250, 200, PLATFORM_HEIGHT),
+        (900, WIN_H - 400, 200, PLATFORM_HEIGHT),
+        # Секция с движущейся платформой
+        (2000, WIN_H - 300, 300, PLATFORM_HEIGHT), # Островок перед хрупкими
+        # Хрупкие платформы
+        (3500, WIN_H - 200, 400, PLATFORM_HEIGHT),
+        (4200, WIN_H - 150, 600, PLATFORM_HEIGHT), # Финиш
     ],
-    3: [
-        # Уровень 3: "Островки" с разрывом (Хардкор вариант)
-        (100, WIN_H - 100, 200, PLATFORM_HEIGHT),
-        (600, WIN_H - 120, 100, PLATFORM_HEIGHT),
-        (1000, WIN_H - 110, 80, PLATFORM_HEIGHT),
-        (1400, WIN_H - 140, 100, PLATFORM_HEIGHT),
-        (1800, WIN_H - 100, 150, PLATFORM_HEIGHT),
-        (2300, WIN_H - 200, 100, PLATFORM_HEIGHT),
-        (2800, WIN_H - 150, 200, PLATFORM_HEIGHT),
-    ],
-    4: [
-        # Уровень 4: Лабиринт (высокие платформы)
-        (50, WIN_H - 100, 150, PLATFORM_HEIGHT),
-        (300, WIN_H - 250, 120, PLATFORM_HEIGHT),
-        (550, WIN_H - 400, 100, PLATFORM_HEIGHT),
-        (850, WIN_H - 350, 150, PLATFORM_HEIGHT),
-        (1100, WIN_H - 500, 120, PLATFORM_HEIGHT),
-        (1400, WIN_H - 300, 200, PLATFORM_HEIGHT),
-        (1800, WIN_H - 200, 150, PLATFORM_HEIGHT),
+}
+
+# Специальные платформы: уровень -> список словарей
+MOVING_PLATFORMS = {
+    2: [
+        {"x": 1400, "y": WIN_H - 400, "w": 200, "h": PLATFORM_HEIGHT, "vx": 200, "vy": 0, "rx": 250, "ry": 0},
+        {"x": 2800, "y": WIN_H - 200, "w": 200, "h": PLATFORM_HEIGHT, "vx": 0, "vy": -150, "rx": 0, "ry": 300},
+    ]
+}
+
+FRAGILE_PLATFORMS = {
+    2: [
+        {"x": 2400, "y": WIN_H - 350, "w": 150, "h": PLATFORM_HEIGHT, "timer": 1.5},
+        {"x": 2700, "y": WIN_H - 500, "w": 150, "h": PLATFORM_HEIGHT, "timer": 1.5},
+        {"x": 3100, "y": WIN_H - 450, "w": 150, "h": PLATFORM_HEIGHT, "timer": 1.5},
     ]
 }
 
@@ -76,6 +72,10 @@ CHECKPOINTS = {
     1: [
         (1100, 1100, WIN_H - 150),
         (2650, 2650, WIN_H - 400),
+    ],
+    2: [
+        (1000, 1000, WIN_H - 400),
+        (3600, 3600, WIN_H - 200),
     ]
 }
 
@@ -85,5 +85,16 @@ ENEMIES = {
         ("crazy_mushroom", 2250, WIN_H - 200 - 64, 0),
         ("wood_golem", 3300, WIN_H - 250 - 80, 200),
         ("wood_golem", 3800, WIN_H - 350 - 80, 150),
+    ],
+    2: [
+        ("wood_golem", 2050, WIN_H - 300 - 80, 100),
+    ]
+}
+
+# Опасности: шипы и т.д.
+HAZARDS = {
+    2: [
+        {"x": 500, "y": WIN_H - 40, "w": 1000, "h": 40}, # Шипы на полу в начале
+        {"x": 2000, "y": WIN_H - 300 - 30, "w": 60, "h": 30}, # Шипы на платформе
     ]
 }

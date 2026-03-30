@@ -2,8 +2,11 @@ import os
 import sys
 import json
 import pygame
-from .entities import Player, Enemy, SPRITE_FILES
-from .config import MAX_SPEED, GRAVITY, JUMP_SPEED, FLY_SPEED, LEVELS, WIN_W, WIN_H, WORLD_W, WORLD_H, SPAWN_POS, CHECKPOINTS, ENEMIES
+from .entities import Player, Enemy, Platform, Hazard, SPRITE_FILES
+from .config import (
+    MAX_SPEED, GRAVITY, JUMP_SPEED, FLY_SPEED, LEVELS, WIN_W, WIN_H, WORLD_W, WORLD_H,
+    SPAWN_POS, CHECKPOINTS, ENEMIES, MOVING_PLATFORMS, FRAGILE_PLATFORMS, HAZARDS
+)
 PLATFORM_HEIGHT = 30
 PLATFORM_MARGIN = 60
 FIXED_DT = 1 / 120
@@ -143,9 +146,17 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
         if os.path.exists(path):
             surf = pygame.image.load(path).convert_alpha()
             mushroom_sprite = pygame.transform.smoothscale(surf, (64, 64))
-            mushroom_bbox = mushroom_sprite.get_bounding_rect()
     except Exception as e:
         print(f"Error loading mushroom: {e}")
+    # Загружаем спрайт шипа
+    spike_sprite = None
+    try:
+        path = os.path.join("resources", "Spike.png")
+        if os.path.exists(path):
+            surf = pygame.image.load(path).convert_alpha()
+            spike_sprite = pygame.transform.smoothscale(surf, (40, 40))
+    except Exception as e:
+        print(f"Error loading spike: {e}")
 
     # Загружаем спрайт голема
     golem_sprite = None
@@ -207,7 +218,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
     # Хитбокс для коллизий (уже, чем спрайт)
     hitbox_w = int(player.w * 0.4)
     hitbox_offset_x = (player.w - hitbox_w) // 2
-    
+
     # Хитбокс по вертикали (от головы до ног с учетом паддинга)
     hitbox_offset_y = 10
     hitbox_h = player.h - bottom_padding - hitbox_offset_y
@@ -218,7 +229,40 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
     # === ЗАГРУЗКА ПЛАТФОРМ УРОВНЯ ===
     # Получаем конфиг уровня или дефолтный (уровень 1)
     level_config = LEVELS.get(level, LEVELS[1])
-    platforms = [pygame.Rect(x, y, w, h) for (x, y, w, h) in level_config]
+    platforms = []
+
+    # 1. Обычные платформы
+    for (x, y, w, h) in level_config:
+        platforms.append(Platform(rect=pygame.Rect(x, y, w, h)))
+
+    # 2. Движущиеся
+    moving_cfg = MOVING_PLATFORMS.get(level, [])
+    for p in moving_cfg:
+        platforms.append(Platform(
+            rect=pygame.Rect(p["x"], p["y"], p["w"], p["h"]),
+            type="moving",
+            vx=p["vx"], vy=p["vy"],
+            range_x=p["rx"], range_y=p["ry"],
+            start_x=p["x"], start_y=p["y"]
+        ))
+
+    # 3. Хрупкие
+    fragile_cfg = FRAGILE_PLATFORMS.get(level, [])
+    for p in fragile_cfg:
+        platforms.append(Platform(
+            rect=pygame.Rect(p["x"], p["y"], p["w"], p["h"]),
+            type="fragile",
+            timer=0  # Таймер запустится при контакте
+        ))
+
+    # Сразу инициализируем лимит времени для хрупких в конфиге
+    fragile_limits = { (p["x"], p["y"]): p["timer"] for p in fragile_cfg }
+
+    # === ЗАГРУЗКА ОПАСНОСТЕЙ ===
+    hazards = []
+    hazard_cfg = HAZARDS.get(level, [])
+    for h_data in hazard_cfg:
+        hazards.append(Hazard(type="spike", x=h_data["x"], y=h_data["y"], w=h_data["w"], h=h_data["h"]))
 
     # === ЧЕКПОЙНТЫ (ТОЛЬКО ДЛЯ ТЕКУЩЕЙ СЕССИИ) ===
     current_spawn = SPAWN_POS
@@ -254,7 +298,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
     prev_time = pygame.time.get_ticks() / 1000.0
 
     level_start_time = pygame.time.get_ticks()
-    timer_font = pygame.font.Font(None, 48)
+    timer_font = pygame.font.SysFont("Menlo, Monaco, Courier New, monospace", 40, bold=True)
 
     running = True
     try:
@@ -317,6 +361,9 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 player.x += player.vx * FIXED_DT
                 player.y += player.vy * FIXED_DT
 
+                for plat in platforms:
+                    plat.update(FIXED_DT)
+
                 # Границы по X (Мировые)
                 player.x = max(0, min(player.x, WORLD_W - player.w))
 
@@ -325,6 +372,30 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                     player.y = 0
                     if player.vy < 0:
                         player.vy = 0
+
+                death_triggered = False
+                player_rect = pygame.Rect(player.x, player.y, player.w, player.h)
+                for haz in hazards:
+                    haz_rect = pygame.Rect(haz.x, haz.y, haz.w, haz.h)
+                    if player_rect.colliderect(haz_rect):
+                        death_triggered = True
+                        break
+
+                if death_triggered:
+                    player.x, player.y = current_spawn
+                    player.y -= player.h
+                    player.vx = 0
+                    player.vy = 0
+                    player.grounded = False
+
+                    # Сбрасываем хрупкие платформы при смерти
+                    for plat in platforms:
+                        if plat.type == "fragile":
+                            plat.is_active = True
+                            plat.timer = 0
+
+                    accumulator = 0
+                    continue
 
                 # --- КОЛЛИЗИЯ С ПЛАТФОРМАМИ ---
                 # Считаем хитбокс по X и Y
@@ -335,7 +406,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 # --- КОЛЛИЗИЯ С ВРАГАМИ ---
                 death_triggered = False
                 full_player_rect = pygame.Rect(player.x, player.y, player.w, player.h)
-                
+
                 for en in enemies:
                     if en.type == "crazy_mushroom" and mushroom_sprite:
                         enemy_rect = mushroom_bbox.move(en.x, en.y)
@@ -348,7 +419,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                             en.x += en.vx * FIXED_DT
                             if abs(en.x - en.start_x) >= en.patrol_range:
                                 en.direction *= -1
-                        
+
                         enemy_rect = golem_bbox.move(en.x, en.y)
                         if full_player_rect.colliderect(enemy_rect):
                             death_triggered = True
@@ -360,7 +431,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                         player.vy = 0
                         player.grounded = False
                         break
-                
+
                 if death_triggered:
                     accumulator = 0
                     continue
@@ -370,31 +441,51 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 foot_y = head_y + hitbox_h
 
                 on_platform = False
+                platform_to_stick = None
 
                 for plat in platforms:
+                    if not plat.is_active:
+                        continue
+
+                    p_rect = plat.rect
                     # Проверяем попадание по X (хитбокс тела пересекает платформу)
-                    if (current_hitbox_x + hitbox_w > plat.left) and (current_hitbox_x < plat.right):
+                    if (current_hitbox_x + hitbox_w > p_rect.left) and (current_hitbox_x < p_rect.right):
 
                         # 1. Проверка Головы (Столкновение снизу вверх)
                         if player.vy < 0:
-                            if head_y >= plat.bottom - 10 and head_y <= plat.bottom + 5:
-                                player.y = plat.bottom - hitbox_offset_y # Отбрасываем вниз
+                            if head_y >= p_rect.bottom - 10 and head_y <= p_rect.bottom + 5:
+                                player.y = p_rect.bottom - hitbox_offset_y # Отбрасываем вниз
                                 player.vy = 0 # Останавливаем взлет
 
                         # 2. Проверка Ног (Приземление)
                         elif player.vy >= 0:
-                            if (foot_y >= plat.top) and (foot_y <= plat.top + PLATFORM_HEIGHT + 10):
-                                player.y = plat.top - player.h + bottom_padding
+                            if (foot_y >= p_rect.top) and (foot_y <= p_rect.top + PLATFORM_HEIGHT + 10):
+                                player.y = p_rect.top - player.h + bottom_padding
                                 player.vy = 0
                                 player.grounded = True
                                 on_platform = True
+                                platform_to_stick = plat
+
+                                # Если платформа хрупкая и еще не запущена - запускаем
+                                if plat.type == "fragile" and plat.timer <= 0:
+                                    key = (plat.start_x if hasattr(plat, "start_x") else plat.rect.x,
+                                           plat.start_y if hasattr(plat, "start_y") else plat.rect.y)
+                                    # Находим лимит времени из конфига (мы сохранили их ранее в fragile_limits)
+                                    # Или просто захардкодим/найдем в начале
+                                    limit = fragile_limits.get( (plat.rect.x, plat.rect.y), 1.0 )
+                                    plat.timer = limit
+
+                # Если стоим на движущейся платформе - наследуем её движение
+                if on_platform and platform_to_stick and platform_to_stick.type == "moving":
+                    player.x += platform_to_stick.vx * FIXED_DT
+                    player.y += platform_to_stick.vy * FIXED_DT
 
                 # --- ПРОВЕРКА ЧЕКПОЙНТОВ ---
                 if level_checkpoints and player.x >= level_checkpoints[0][0]:
                     cp = level_checkpoints.pop(0)
                     current_spawn = (cp[1], cp[2])
                     active_checkpoint = cp
-                
+
                 # --- ПРОВЕРКА ЗАВЕРШЕНИЯ УРОВНЯ (МАЯК) ---
                 player_rect = pygame.Rect(player.x, player.y, player.w, player.h)
                 if player_rect.colliderect(finish_rect):
@@ -404,7 +495,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                     player.vx = 0
                     player.vy = 0
                     player.grounded = False
-                    
+
                     current_spawn = SPAWN_POS
                     level_start_time = pygame.time.get_ticks()
                     level_checkpoints = CHECKPOINTS.get(level, []).copy()
@@ -417,6 +508,11 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                     player.vx = 0
                     player.vy = 0
                     player.grounded = False
+
+                    for plat in platforms:
+                        if plat.type == "fragile":
+                            plat.is_active = True
+                            plat.timer = 0
 
                 if not on_platform and player.vy > 0:
                     player.grounded = False
@@ -472,18 +568,26 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
 
             # Рисуем все платформы с учетом камеры
             for i, plat in enumerate(platforms):
+                if not plat.is_active:
+                    continue
 
+                p_rect = plat.rect
                 if platform_sprites:
                     sprite_index = i % len(platform_sprites)
                     sprite = platform_sprites[sprite_index]
 
-                    scale = plat.width / sprite.get_width()
-                    new_w = plat.width
+                    scale = p_rect.width / sprite.get_width()
+                    new_w = p_rect.width
                     new_h = int(sprite.get_height() * scale)
 
                     scaled = pygame.transform.smoothscale(sprite, (new_w, new_h))
 
-                    draw_x = plat.x - camera.camera.x
+                    # Визуальное затухание для хрупких платформ
+                    if plat.type == "fragile" and plat.timer > 0:
+                        alpha = int(255 * (plat.timer / fragile_limits.get((plat.rect.x, plat.rect.y), 1.0)))
+                        scaled.set_alpha(alpha)
+
+                    draw_x = p_rect.x - camera.camera.x
 
                     # platform2.png поднимаем выше
                     if sprite_index == 1:
@@ -491,12 +595,27 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                     else:
                         offset = 0.4
 
-                    draw_y = plat.y - camera.camera.y - int(new_h * offset)
-
+                    draw_y = p_rect.y - camera.camera.y - int(new_h * offset)
                     screen.blit(scaled, (draw_x, draw_y))
-
                 else:
-                    pygame.draw.rect(screen, (70, 70, 90), camera.apply(plat))
+                    color = (70, 70, 90)
+                    if plat.type == "moving": color = (100, 100, 150)
+                    elif plat.type == "fragile": color = (150, 100, 100)
+                    pygame.draw.rect(screen, color, camera.apply(p_rect))
+
+            # Рисуем опасности (шипы)
+            for haz in hazards:
+                if haz.type == "spike" and spike_sprite:
+                    # Шипы могут быть широкими, рисуем их плиткой
+                    haz_w = haz.w
+                    spike_w = spike_sprite.get_width()
+                    num_spikes = (haz_w + spike_w - 1) // spike_w
+                    for s_idx in range(num_spikes):
+                        draw_x = haz.x + s_idx * spike_w - camera.camera.x
+                        draw_y = haz.y - camera.camera.y
+                        screen.blit(spike_sprite, (draw_x, draw_y))
+                else:
+                    pygame.draw.rect(screen, (255, 0, 0), camera.apply(pygame.Rect(haz.x, haz.y, haz.w, haz.h)))
 
             # Рисуем врагов
             for en in enemies:
@@ -556,7 +675,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
             ms_rounded = ms // 10
             timer_text = f"{mins}:{secs:02d}:{ms_rounded:02d}"
             timer_surf = timer_font.render(timer_text, True, (255, 255, 255))
-            timer_rect = timer_surf.get_rect(center=(WIN_W // 2, 30))
+            timer_rect = timer_surf.get_rect(topleft=(WIN_W // 2 - 85, 20))
             timer_shadow = timer_font.render(timer_text, True, (0, 0, 0))
             screen.blit(timer_shadow, timer_rect.move(2, 2))
             screen.blit(timer_surf, timer_rect)
