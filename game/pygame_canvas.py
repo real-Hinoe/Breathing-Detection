@@ -55,24 +55,6 @@ def create_background_surface():
     return bg
 
 
-def extract_ground_tile(surface, top_cut=0.25, bottom_cut=0.25):
-    """
-    Берёт центральную часть текстуры земли.
-    top_cut / bottom_cut — сколько отрезать сверху и снизу.
-    """
-    h = surface.get_height()
-
-    y1 = int(h * top_cut)
-    y2 = int(h * (1 - bottom_cut))
-
-    rect = pygame.Rect(0, y1, surface.get_width(), y2 - y1)
-
-    tile = pygame.Surface(rect.size, pygame.SRCALPHA)
-    tile.blit(surface, (0, 0), rect)
-
-    return tile
-
-
 def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running_flag=None):
     """
     Запускает уровень на pygame.
@@ -92,25 +74,18 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
     bg_surf = create_background_surface()
 
     # === PARALLAX BACKGROUND ===
+    # === PARALLAX BACKGROUND ===
+
     bg_layers = []
 
-    for i in range(1, 4):
+    for i in [1, 3, 2]:
         try:
             path = os.path.join("resources", f"background{i}.png")
-            if os.path.exists(path):
 
+            if os.path.exists(path):
                 surf = pygame.image.load(path).convert_alpha()
 
-                # масштабируем по высоте окна
-                scale = WIN_H / surf.get_height()
-
-                new_w = int(surf.get_width() * scale)
-                new_h = WIN_H
-
-                surf = pygame.transform.smoothscale(surf, (new_w, new_h))
-
                 bg_layers.append(surf)
-
             else:
                 bg_layers.append(None)
 
@@ -120,9 +95,9 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
 
     # Чем меньше коэффициент — тем дальше слой
     parallax_factors = [
-        0.35,  # background1 (ближе)
-        0.2,  # background2
-        0.1  # background3 (самый дальний)
+        0.25,  # background1 — самый дальний
+        0.1,  # background2 — передний
+        0.5  # background3 — средний
     ]
 
     # === ИНИЦИАЛИЗАЦИЯ ИГРОКА ===
@@ -212,12 +187,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
             if os.path.exists(path):
                 surf = pygame.image.load(path).convert_alpha()
 
-                # берём только середину
-                ground_tiles[i] = extract_ground_tile(
-                    surf,
-                    top_cut=0.35,
-                    bottom_cut=0.15
-                )
+                ground_tiles[i] = surf
 
         except Exception as e:
             print(f"Error loading ground{i}: {e}")
@@ -585,26 +555,48 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
             screen.blit(bg_surf, (0, 0))
 
             # === PARALLAX RENDER ===
-            # for i in reversed(range(len(bg_layers))):
-            #     layer = bg_layers[i]
-            for i, layer in enumerate(bg_layers):
+            # =====================================================
+            #                PARALLAX (1:1 WORLD LOCK)
+            # =====================================================
 
-                if layer:
+            # порядок: дальний -> ближний
+            render_order = [0, 1, 2]
 
-                    factor = parallax_factors[i]
+            for idx in render_order:
 
-                    # смещение слоя
-                    offset_x = -camera.camera.x * factor
+                if idx >= len(bg_layers):
+                    continue
 
-                    layer_w = layer.get_width()
+                layer = bg_layers[idx]
+                if not layer:
+                    continue
 
-                    # рисуем несколько копий чтобы фон не заканчивался
-                    start_x = int(offset_x) % layer_w - layer_w
+                factor = parallax_factors[idx]
 
-                    x = start_x
-                    while x < WIN_W:
-                        screen.blit(layer, (x, 0))
-                        x += layer_w
+                layer_w = layer.get_width()
+
+                # мировая позиция слоя
+                world_offset = camera.camera.x * factor
+
+                start_x = -int(world_offset)
+
+                # рисуем строго по миру
+                x = start_x
+
+                while x < WIN_W:
+
+                    # --- вертикальное расположение слоёв ---
+                    if idx == 1:  # background2 (передний)
+                        y = WIN_H - layer.get_height()
+
+                    elif idx == 2:  # background3 (средний)
+                        y = WIN_H - layer.get_height()
+
+                    else:  # background1 (дальний)
+                        y = WIN_H - layer.get_height()
+
+                    screen.blit(layer, (x, y))
+                    x += layer_w
 
             # Рисуем все платформы с учетом камеры
             for i, plat in enumerate(platforms):
@@ -643,6 +635,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                     # ====================================================
                     #          ДОСТРАИВАЕМ ЗЕМЛЮ ДО НИЗА ЭКРАНА
                     # ====================================================
+
                     ground_index = sprite_index + 1
 
                     if ground_index in ground_tiles:
@@ -650,6 +643,7 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                         tile = ground_tiles[ground_index]
 
                         scale = plat.rect.width / tile.get_width()
+
                         tile_w = plat.rect.width
                         tile_h = int(tile.get_height() * scale)
 
@@ -658,14 +652,20 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                             (tile_w, tile_h)
                         )
 
-                        # 🔥 ВАЖНО:
-                        # начинаем ЧУТЬ ВЫШЕ чтобы земля
-                        # залезла под остров
-                        ground_y = draw_y + new_h - int(tile_h * 0.6)
+                        # 🔥 СТАРТ РОВНО ОТ НИЗА ПЛАТФОРМЫ
+                        GROUND_OVERLAP_PERCENT = 0.10  # 10% перекрытия
+
+                        overlap = int(tile_h * GROUND_OVERLAP_PERCENT)
+
+                        # старт строго от платформы
+                        ground_y = p_rect.bottom - camera.camera.y
+
+                        # шаг меньше высоты - тайлы заходят друг на друга
+                        step = tile_h - overlap
 
                         while ground_y < WIN_H:
                             screen.blit(tile_scaled, (draw_x, ground_y))
-                            ground_y += tile_h
+                            ground_y += step
 
                 else:
                     color = (70, 70, 90)
