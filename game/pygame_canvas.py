@@ -371,7 +371,11 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                 player.x += player.vx * FIXED_DT
                 player.y += player.vy * FIXED_DT
 
+                # Запоминаем позиции движущихся платформ ДО обновления
+                moving_old_pos = {}
                 for plat in platforms:
+                    if plat.type == "moving":
+                        moving_old_pos[id(plat)] = (plat.rect.x, plat.rect.y)
                     plat.update(FIXED_DT)
 
                 # Границы по X (Мировые)
@@ -485,10 +489,12 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                                     limit = fragile_limits.get( (plat.rect.x, plat.rect.y), 1.0 )
                                     plat.timer = limit
 
-                # Если стоим на движущейся платформе - наследуем её движение
+                # Если стоим на движущейся платформе — корректируем позицию по дельте
                 if on_platform and platform_to_stick and platform_to_stick.type == "moving":
-                    player.x += platform_to_stick.vx * FIXED_DT
-                    player.y += platform_to_stick.vy * FIXED_DT
+                    old = moving_old_pos.get(id(platform_to_stick))
+                    if old:
+                        player.x += platform_to_stick.rect.x - old[0]
+                        # Y уже привязан коллизией — корректируем только X
 
                 # --- ПРОВЕРКА ЧЕКПОЙНТОВ ---
                 if level_checkpoints and player.x >= level_checkpoints[0][0]:
