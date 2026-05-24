@@ -310,6 +310,8 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
     level_start_time = pygame.time.get_ticks()
     timer_font = pygame.font.SysFont("Menlo, Monaco, Courier New, monospace", 40, bold=True)
 
+    scaled_platform_cache = {}
+    scaled_ground_cache = {}
     running = True
     try:
         while running:
@@ -618,7 +620,15 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                     new_w = p_rect.width
                     new_h = int(sprite.get_height() * scale)
 
-                    scaled = pygame.transform.smoothscale(sprite, (new_w, new_h))
+                    cache_key = (sprite_index, new_w, new_h)
+
+                    if cache_key not in scaled_platform_cache:
+                        scaled_platform_cache[cache_key] = pygame.transform.smoothscale(
+                            sprite,
+                            (new_w, new_h)
+                        )
+
+                    scaled = scaled_platform_cache[cache_key]
 
                     # Визуальное затухание для хрупких платформ
                     if plat.type == "fragile" and plat.timer > 0:
@@ -653,10 +663,15 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                         tile_w = plat.rect.width
                         tile_h = int(tile.get_height() * scale)
 
-                        tile_scaled = pygame.transform.smoothscale(
-                            tile,
-                            (tile_w, tile_h)
-                        )
+                        ground_key = (ground_index, tile_w, tile_h)
+
+                        if ground_key not in scaled_ground_cache:
+                            scaled_ground_cache[ground_key] = pygame.transform.smoothscale(
+                                tile,
+                                (tile_w, tile_h)
+                            )
+
+                        tile_scaled = scaled_ground_cache[ground_key]
 
                         # 🔥 СТАРТ РОВНО ОТ НИЗА ПЛАТФОРМЫ
                         GROUND_OVERLAP_PERCENT = 0.10  # 10% перекрытия
@@ -721,7 +736,15 @@ def run_pygame_level(level: int = 1, draw_hitbox: bool = False, external_running
                     new_w = int(sprite.get_width() * scale)
                     new_h = target_height
 
-                    scaled = pygame.transform.smoothscale(sprite, (new_w, new_h))
+                    cache_key = (sprite_index, new_w, new_h)
+
+                    if cache_key not in scaled_platform_cache:
+                        scaled_platform_cache[cache_key] = pygame.transform.smoothscale(
+                            sprite,
+                            (new_w, new_h)
+                        )
+
+                    scaled = scaled_platform_cache[cache_key]
 
                     draw_x = x - camera.camera.x
                     draw_y = y - new_h - camera.camera.y

@@ -277,17 +277,31 @@ class CameraWindow(QtWidgets.QMainWindow):
     # - нижняя часть (stretch=1) - текст подсказки,
     # - кнопка "Вернуться" позиционируется в правом-низу окна.
     def init_ui(self, base_size, btn_w, btn_h, font_px):
-        """Создаёт интерфейс окна: область видео + нижняя панель + кнопка возврата."""
         w, h = base_size.width(), base_size.height()
 
         central = QtWidgets.QWidget()
-        top_layout = QtWidgets.QHBoxLayout(central)
-        top_layout.setContentsMargins(0, 0, 0, 0)
+
+        root_layout = QtWidgets.QVBoxLayout(central)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(8)
+
+        top_widget = QtWidgets.QWidget()
+        top_layout = QtWidgets.QHBoxLayout(top_widget)
+
+        top_layout.setContentsMargins(8, 8, 8, 0)
         top_layout.setSpacing(8)
 
-        self.game_holder = AspectLabel(bg_color=QtGui.QColor(240, 240, 240))
-        self.video_holder = AspectLabel(bg_color=QtGui.QColor(220, 235, 255))
-        self.video_holder.inner_widget().setText("Плейсхолдер камеры(16:9)")
+        self.game_holder = AspectLabel(
+            bg_color=QtGui.QColor(240, 240, 240)
+        )
+
+        self.video_holder = AspectLabel(
+            bg_color=QtGui.QColor(220, 235, 255)
+        )
+
+        self.video_holder.inner_widget().setText(
+            "Плейсхолдер камеры (16:9)"
+        )
 
         sliders_box = QtWidgets.QVBoxLayout()
         sliders_box.setContentsMargins(8, 8, 4, 8)
@@ -296,65 +310,92 @@ class CameraWindow(QtWidgets.QMainWindow):
         self.h_slider = QSlider(Qt.Horizontal, self)
         self.h_slider.setMinimum(0)
         self.h_slider.setMaximum(255)
+
         self.s_slider = QSlider(Qt.Horizontal, self)
         self.s_slider.setMinimum(0)
         self.s_slider.setMaximum(255)
+
         self.v_slider = QSlider(Qt.Horizontal, self)
         self.v_slider.setMinimum(0)
         self.v_slider.setMaximum(255)
 
-        sliders_box.addWidget(QtWidgets.QLabel("Green Range"),
-                              alignment=Qt.AlignLeft)
-        sliders_box.addWidget(QtWidgets.QLabel("H:"), alignment=Qt.AlignLeft)
+        sliders_box.addWidget(
+            QtWidgets.QLabel("Green Range"),
+            alignment=Qt.AlignLeft
+        )
+
+        sliders_box.addWidget(
+            QtWidgets.QLabel("H:"),
+            alignment=Qt.AlignLeft
+        )
+
         sliders_box.addWidget(self.h_slider)
-        sliders_box.addWidget(QtWidgets.QLabel("S:"), alignment=Qt.AlignLeft)
+
+        sliders_box.addWidget(
+            QtWidgets.QLabel("S:"),
+            alignment=Qt.AlignLeft
+        )
+
         sliders_box.addWidget(self.s_slider)
-        sliders_box.addWidget(QtWidgets.QLabel("V:"), alignment=Qt.AlignLeft)
+
+        sliders_box.addWidget(
+            QtWidgets.QLabel("V:"),
+            alignment=Qt.AlignLeft
+        )
+
         sliders_box.addWidget(self.v_slider)
-        sliders_box.addStretch()  # прижать слайдеры к верху
+
+        sliders_box.addStretch()
+
         sliders_widget = QtWidgets.QWidget()
         sliders_widget.setLayout(sliders_box)
 
-        top_layout.addWidget(sliders_widget, stretch=0)
-        top_layout.addWidget(self.video_holder, stretch=9)
-
-        bottom = QtWidgets.QFrame()
-        bottom.setFrameShape(QtWidgets.QFrame.StyledPanel)
-        bottom.setMinimumHeight(max(24, int(h * 0.1)))
-        bl = QtWidgets.QHBoxLayout(bottom)
-        bl.setContentsMargins(8, 4, 8, 4)
         self.info_label = QtWidgets.QLabel()
-        bl.addWidget(self.info_label)
-        top_layout.addWidget(bottom, stretch=1)
+        self.info_label.setAlignment(Qt.AlignCenter)
+
+        top_layout.addWidget(sliders_widget, stretch=0)
+        top_layout.addWidget(self.video_holder, stretch=1)
+
+        buttons_widget = QtWidgets.QWidget()
+
+        buttons_layout = QtWidgets.QHBoxLayout(buttons_widget)
+
+        buttons_layout.setContentsMargins(12, 0, 12, 12)
+        buttons_layout.setSpacing(12)
+
+        self.btn_back = styled_tile_button(
+            "Вернуться",
+            btn_w,
+            btn_h,
+            font_px
+        )
+
+        self.btn_change_cam = styled_tile_button(
+            "Сменить камеру",
+            btn_w,
+            btn_h,
+            font_px
+        )
+
+        buttons_layout.addWidget(self.btn_back)
+
+        buttons_layout.addStretch()
+
+        buttons_layout.addWidget(
+            self.info_label,
+            stretch=1
+        )
+
+        buttons_layout.addStretch()
+
+        buttons_layout.addWidget(self.btn_change_cam)
+
+        root_layout.addWidget(top_widget, stretch=1)
+        root_layout.addWidget(buttons_widget, stretch=0)
 
         self.setCentralWidget(central)
 
-        # фиксируем размер окна, чтобы кнопка была в ожидаемом месте
         self.setFixedSize(w, h)
-
-        # кнопка возврата в правом-низу - позиция вычисляется от размера окна
-        self.btn_back = styled_tile_button(
-            "Вернуться", btn_w, btn_h, font_px, parent=self
-        )
-        margin = 12
-        bx = self.width() - btn_w - margin
-        by = self.height() - btn_h - margin
-        self.btn_back.move(bx, by)
-        self.btn_back.setParent(self)
-        self.btn_back.show()
-
-        self.btn_change_cam = styled_tile_button(
-            "Сменить камеру", btn_w, btn_h, font_px, parent=self
-        )
-        btn_camx = (self.width() - btn_w) // 2
-        btn_camy = self.height() - btn_h - margin
-        self.btn_change_cam.move(btn_camx, btn_camy)
-        self.btn_change_cam.setParent(self)
-        self.btn_change_cam.show()
-
-        # self.h_slider.valueChanged[int].connect(self.change_valueH)
-        # self.s_slider.valueChanged[int].connect(self.change_valueS)
-        # self.v_slider.valueChanged[int].connect(self.change_valueV)
 
         self.btn_change_cam.clicked.connect(self.on_change_cam_clicked)
         self.btn_back.clicked.connect(self.on_back_clicked)
